@@ -109,7 +109,9 @@ class ZhihuImageProcessor:
 
                 # 过滤掉一些不需要的图片
                 if self._should_skip_image(src):
-                    utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Skipping img {img_idx + 1} in figure {figure_idx + 1}: URL pattern matched skip rules")
+                    # 对于data:协议的URL，只显示前50个字符避免日志过长
+                    display_url = src[:50] + "..." if src.startswith('data:') and len(src) > 50 else src
+                    utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Skipping img {img_idx + 1} in figure {figure_idx + 1}: {display_url} (filtered by skip rules)")
                     continue
 
                 # 获取图片信息
@@ -190,10 +192,18 @@ class ZhihuImageProcessor:
         判断是否应该跳过某个图片
         Args:
             url: 图片URL
-            
+
         Returns:
             是否跳过
         """
+        # 跳过data:协议的内联图片（如SVG占位符）
+        if url.startswith('data:'):
+            return True
+
+        # 跳过非HTTP/HTTPS协议的URL
+        if not url.startswith(('http://', 'https://')):
+            return True
+
         skip_patterns = [
             r'avatar',  # 头像
             r'icon',    # 图标
@@ -202,11 +212,11 @@ class ZhihuImageProcessor:
             r'1x1',     # 1x1像素图片
             r'placeholder',  # 占位图
         ]
-        
+
         for pattern in skip_patterns:
             if re.search(pattern, url, re.IGNORECASE):
                 return True
-                
+
         return False
     
     def _get_image_extension(self, url: str) -> str:
@@ -252,8 +262,10 @@ class ZhihuImageProcessor:
         
         async with self.semaphore:
             try:
-                utils.logger.info(f"[ZhihuImageProcessor.download_image] Downloading: {url}")
-                
+                # 对于data:协议的URL，只显示前50个字符避免日志过长
+                display_url = url[:50] + "..." if url.startswith('data:') and len(url) > 50 else url
+                utils.logger.info(f"[ZhihuImageProcessor.download_image] Downloading: {display_url}")
+
                 response = await self.session.get(url)
                 response.raise_for_status()
                 
@@ -266,7 +278,9 @@ class ZhihuImageProcessor:
                 return response.content
                 
             except Exception as e:
-                utils.logger.error(f"[ZhihuImageProcessor.download_image] Error downloading {url}: {e}")
+                # 对于data:协议的URL，只显示前50个字符避免日志过长
+                display_url = url[:50] + "..." if url.startswith('data:') and len(url) > 50 else url
+                utils.logger.error(f"[ZhihuImageProcessor.download_image] Error downloading {display_url}: {e}")
                 return None
     
     async def process_content_images(self, content_item: Dict) -> List[Dict]:
