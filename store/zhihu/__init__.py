@@ -10,7 +10,7 @@
 
 
 # -*- coding: utf-8 -*-
-from typing import List
+from typing import List, Dict
 
 import config
 from base.base_crawler import AbstractStore
@@ -18,6 +18,7 @@ from model.m_zhihu import ZhihuComment, ZhihuContent, ZhihuCreator
 from store.zhihu.zhihu_store_impl import (ZhihuCsvStoreImplement,
                                           ZhihuDbStoreImplement,
                                           ZhihuJsonStoreImplement)
+from store.zhihu.zhihu_store_image import ZhihuStoreImage
 from tools import utils
 from var import source_keyword_var
 
@@ -51,11 +52,12 @@ async def batch_update_zhihu_contents(contents: List[ZhihuContent]):
     for content_item in contents:
         await update_zhihu_content(content_item)
 
-async def update_zhihu_content(content_item: ZhihuContent):
+async def update_zhihu_content(content_item: ZhihuContent, images_info: List[Dict] = None):
     """
     更新知乎内容
     Args:
-        content_item:
+        content_item: 知乎内容对象
+        images_info: 图片信息列表
 
     Returns:
 
@@ -63,6 +65,11 @@ async def update_zhihu_content(content_item: ZhihuContent):
     content_item.source_keyword = source_keyword_var.get()
     local_db_item = content_item.model_dump()
     local_db_item.update({"last_modify_ts": utils.get_current_timestamp()})
+
+    # 添加图片信息到数据中
+    if images_info:
+        local_db_item["images"] = images_info
+
     utils.logger.info(f"[store.zhihu.update_zhihu_content] zhihu content: {local_db_item}")
     await ZhihuStoreFactory.create_store().store_content(local_db_item)
 
@@ -113,3 +120,23 @@ async def save_creator(creator: ZhihuCreator):
     local_db_item = creator.model_dump()
     local_db_item.update({"last_modify_ts": utils.get_current_timestamp()})
     await ZhihuStoreFactory.create_store().store_creator(local_db_item)
+
+
+async def update_zhihu_image(content_id: str, pic_content: bytes, extension_file_name: str):
+    """
+    保存知乎图片
+    Args:
+        content_id: 内容ID
+        pic_content: 图片内容
+        extension_file_name: 文件扩展名
+
+    Returns:
+
+    """
+    image_store = ZhihuStoreImage()
+    image_content_item = {
+        "content_id": content_id,
+        "pic_content": pic_content,
+        "extension_file_name": extension_file_name
+    }
+    await image_store.store_image(image_content_item)

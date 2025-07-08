@@ -33,6 +33,7 @@ from .client import ZhiHuClient
 from .exception import DataFetchError
 from .help import ZhihuExtractor, judge_zhihu_url
 from .login import ZhiHuLogin
+from .image_processor import ZhihuImageProcessor
 
 
 class ZhihuCrawler(AbstractCrawler):
@@ -531,9 +532,18 @@ class ZhihuCrawler(AbstractCrawler):
                         except Exception as e:
                             utils.logger.error(f"[ZhihuCrawler.get_collection_contents] Error getting full content for {content_title}: {e}")
 
+                        # 检测是否包含图片
+                        zhihu_content.has_images = self._detect_images_in_content(zhihu_content)
+
+                        # 处理图片并获取图片信息（一步到位）
+                        images_info = []
+                        if config.ENABLE_GET_IMAGES and zhihu_content.has_images:
+                            images_info = await self._process_images_with_browser(zhihu_content)
+                            zhihu_content.images_processed = True
+
                         all_contents.append(zhihu_content)
-                        # 保存内容
-                        await zhihu_store.update_zhihu_content(zhihu_content)
+                        # 保存内容（包含图片信息）
+                        await zhihu_store.update_zhihu_content(zhihu_content, images_info)
 
                         # 添加延迟避免请求过快
                         await asyncio.sleep(0.5)
@@ -624,15 +634,19 @@ class ZhihuCrawler(AbstractCrawler):
 
                 utils.logger.info(f"[ZhihuCrawler._get_full_content_detail] Getting full content for {content_type}: {content_url}")
 
+                # 方法1：通过API获取结构化数据
+                zhihu_content = None
                 if content_type == "answer" and "question_id" in ids and "answer_id" in ids:
-                    return await self.zhihu_client.get_answer_info(ids["question_id"], ids["answer_id"])
+                    zhihu_content = await self.zhihu_client.get_answer_info(ids["question_id"], ids["answer_id"])
                 elif content_type == "article" and "article_id" in ids:
-                    return await self.zhihu_client.get_article_info(ids["article_id"])
+                    zhihu_content = await self.zhihu_client.get_article_info(ids["article_id"])
                 elif content_type == "zvideo" and "video_id" in ids:
-                    return await self.zhihu_client.get_video_info(ids["video_id"])
+                    zhihu_content = await self.zhihu_client.get_video_info(ids["video_id"])
                 else:
                     utils.logger.warning(f"[ZhihuCrawler._get_full_content_detail] Unsupported content type: {content_type}")
                     return None
+
+                return zhihu_content
 
             except Exception as e:
                 utils.logger.error(f"[ZhihuCrawler._get_full_content_detail] Error getting full content for {content_url}: {e}")
@@ -722,6 +736,172 @@ class ZhihuCrawler(AbstractCrawler):
         except Exception as e:
             utils.logger.error(f"[ZhihuCrawler._extract_article_from_collection_item] Error extracting article: {e}")
             return None
+
+    def _detect_images_in_content(self, zhihu_content: ZhihuContent) -> bool:
+        """
+        检测内容中是否包含图片
+        Args:
+            zhihu_content: 知乎内容对象
+
+        Returns:
+            bool: 是否包含图片
+        """
+        # 检查描述和内容中是否有图片占位符
+        desc = zhihu_content.desc or ""
+        content = zhihu_content.content_text or ""
+
+        # 检测图片占位符
+        has_image_placeholder = "[图片]" in desc or "[图片]" in content
+
+        # 检测HTML中是否有图片标签（如果有HTML内容）
+        html_content = getattr(zhihu_content, 'content_html', '') or ""
+        has_img_tag = "<img" in html_content.lower() if html_content else False
+
+        result = has_image_placeholder or has_img_tag
+
+        if result:
+            utils.logger.info(f"[ZhihuCrawler._detect_images_in_content] Detected images in content {zhihu_content.content_id}")
+
+        return result
+
+    async def _process_images_with_browser(self, zhihu_content: ZhihuContent) -> List[Dict]:
+        """
+        使用浏览器获取HTML并处理图片（一步到位）
+        Args:
+            zhihu_content: 知乎内容对象
+
+        Returns:
+            List[Dict]: 图片信息列表
+        """
+        if not config.ENABLE_GET_IMAGES:
+            return []
+
+        content_url = zhihu_content.content_url
+        content_id = zhihu_content.content_id
+
+        try:
+            utils.logger.info(f"[ZhihuCrawler._process_images_with_browser] Processing images for {content_id}")
+
+            # 使用现有浏览器会话获取HTML
+            await self.context_page.goto(content_url, wait_until='networkidle')
+            await asyncio.sleep(3)  # 等待页面完全加载
+
+            # 获取页面HTML
+            page_html = await self.context_page.content()
+            zhihu_content.content_html = page_html
+
+            utils.logger.info(f"[ZhihuCrawler._process_images_with_browser] Got HTML content, length: {len(page_html)}")
+
+            # 使用图片处理器提取和下载图片
+            async with ZhihuImageProcessor() as image_processor:
+                # 提取图片URL
+                images = image_processor.extract_images_from_html(page_html, content_url)
+
+                if not images:
+                    utils.logger.info(f"[ZhihuCrawler._process_images_with_browser] No images found in {content_id}")
+                    return []
+
+                utils.logger.info(f"[ZhihuCrawler._process_images_with_browser] Found {len(images)} images in {content_id}")
+
+                # 下载图片并构建信息
+                images_info = []
+                for image_info in images:
+                    try:
+                        # 下载图片
+                        image_content = await image_processor.download_image(image_info)
+
+                        if image_content:
+                            # 保存图片到本地
+                            from store.zhihu.zhihu_store_image import ZhihuStoreImage
+                            image_store = ZhihuStoreImage()
+                            image_content_item = {
+                                "content_id": content_id,
+                                "pic_content": image_content,
+                                "extension_file_name": image_info['filename']
+                            }
+                            await image_store.store_image(image_content_item)
+
+                            # 构建图片信息
+                            img_info = {
+                                'url': image_info['url'],
+                                'local_path': f"data/zhihu/images/collection_contents/{content_id}/{image_info['filename']}",
+                                'filename': image_info['filename'],
+                                'alt': image_info['alt'],
+                                'title': image_info['title'],
+                                'size': len(image_content),
+                                'download_time': utils.get_current_date()
+                            }
+                            images_info.append(img_info)
+
+                            utils.logger.info(f"[ZhihuCrawler._process_images_with_browser] Downloaded image: {image_info['filename']}")
+
+                    except Exception as e:
+                        utils.logger.error(f"[ZhihuCrawler._process_images_with_browser] Error downloading image: {e}")
+                        continue
+
+                # 添加延迟避免请求过快
+                await asyncio.sleep(2)
+
+                utils.logger.info(f"[ZhihuCrawler._process_images_with_browser] Successfully processed {len(images_info)} images for {content_id}")
+                return images_info
+
+        except Exception as e:
+            utils.logger.error(f"[ZhihuCrawler._process_images_with_browser] Error processing images for {content_id}: {e}")
+            return []
+
+    async def process_content_images_with_info(self, zhihu_content: ZhihuContent) -> List[Dict]:
+        """
+        处理内容中的图片并返回图片信息
+        Args:
+            zhihu_content: 知乎内容对象
+
+        Returns:
+            List[Dict]: 图片信息列表
+        """
+        if not config.ENABLE_GET_IMAGES:
+            return []
+
+        try:
+            # 转换为字典格式，使用HTML内容进行图片处理
+            content_dict = {
+                'content_id': zhihu_content.content_id,
+                'content_text': getattr(zhihu_content, 'content_html', '') or zhihu_content.content_text,
+                'content_url': zhihu_content.content_url,
+                'title': zhihu_content.title
+            }
+
+            # 使用图片处理器处理图片
+            async with ZhihuImageProcessor() as image_processor:
+                downloaded_images = await image_processor.process_content_images(content_dict)
+
+                # 保存图片并构建图片信息
+                images_info = []
+                for image_info in downloaded_images:
+                    # 保存图片到本地
+                    await zhihu_store.update_zhihu_image(
+                        content_id=image_info['content_id'],
+                        pic_content=image_info['pic_content'],
+                        extension_file_name=image_info['extension_file_name']
+                    )
+
+                    # 构建图片信息（用于JSON存储）
+                    img_info = {
+                        'url': image_info.get('url', ''),
+                        'local_path': f"data/zhihu/images/collection_contents/{image_info['content_id']}/{image_info['extension_file_name']}",
+                        'filename': image_info['extension_file_name'],
+                        'alt': image_info.get('alt', ''),
+                        'title': image_info.get('title', ''),
+                        'size': len(image_info['pic_content']) if image_info.get('pic_content') else 0,
+                        'download_time': utils.get_current_date()
+                    }
+                    images_info.append(img_info)
+
+                utils.logger.info(f"[ZhihuCrawler.process_content_images_with_info] Successfully processed {len(images_info)} images for content {zhihu_content.note_id}")
+                return images_info
+
+        except Exception as e:
+            utils.logger.error(f"[ZhihuCrawler.process_content_images_with_info] Error processing images for content {zhihu_content.note_id}: {e}")
+            return []
 
     async def close(self):
         """Close browser context"""
