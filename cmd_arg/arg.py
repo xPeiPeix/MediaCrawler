@@ -36,6 +36,9 @@ async def parse_cmd():
                         help='where to save the data (csv or db or json)', choices=['csv', 'db', 'json'], default=config.SAVE_DATA_OPTION)
     parser.add_argument('--cookies', type=str,
                         help='cookies used for cookie login type', default=config.COOKIES)
+    parser.add_argument('--mode', type=str,
+                        help='crawl mode (full | incremental), full: crawl all content, incremental: skip existing content',
+                        choices=['full', 'incremental'], default='full')
 
     args = parser.parse_args()
 
@@ -49,3 +52,4 @@ async def parse_cmd():
     config.ENABLE_GET_SUB_COMMENTS = args.get_sub_comment
     config.SAVE_DATA_OPTION = args.save_data_option
     config.COOKIES = args.cookies
+    config.CRAWL_MODE = args.mode

@@ -21,6 +21,9 @@ PUBLISH_TIME_TYPE = 0
 CRAWLER_TYPE = (
     "search"  # 爬取类型，search(关键词搜索) | detail(帖子详情)| creator(创作者主页数据) | collection(收藏夹数据，仅支持知乎)
 )
+
+# 爬取模式配置
+CRAWL_MODE = "full"  # full(全量爬取) | incremental(增量爬取，跳过已存在内容)
 # 微博搜索类型 default (综合) | real_time (实时) | popular (热门) | video (视频)
 WEIBO_SEARCH_TYPE = "popular"
 # 自定义User Agent（暂时仅对XHS有效）

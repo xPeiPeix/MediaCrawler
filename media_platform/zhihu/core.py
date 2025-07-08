@@ -27,6 +27,7 @@ from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
 from store import zhihu as zhihu_store
 from tools import utils
 from tools.cdp_browser import CDPBrowserManager
+from tools.content_checker import get_content_checker
 from var import crawler_type_var, source_keyword_var
 
 from .client import ZhiHuClient
@@ -413,6 +414,14 @@ class ZhihuCrawler(AbstractCrawler):
         """
         utils.logger.info("[ZhihuCrawler.get_user_collections] Begin get user collections ...")
 
+        # 初始化内容检测器（用于增量爬取）
+        content_checker = get_content_checker("zhihu")
+        if config.CRAWL_MODE == "incremental":
+            utils.logger.info("[ZhihuCrawler.get_user_collections] Incremental mode enabled, loading existing content IDs...")
+            await content_checker.load_existing_content_ids()
+            stats = content_checker.get_stats()
+            utils.logger.info(f"[ZhihuCrawler.get_user_collections] Found {stats['total_existing']} existing content(s)")
+
         # 获取当前用户信息
         current_user_info = await self.zhihu_client.get_current_user_info()
         user_id = current_user_info.get("id")
@@ -447,7 +456,13 @@ class ZhihuCrawler(AbstractCrawler):
             # 获取收藏夹内容
             await self.get_collection_contents(collection_id, collection_title)
 
-        utils.logger.info("[ZhihuCrawler.get_user_collections] Finished processing all collections")
+        # 显示最终统计信息
+        if config.CRAWL_MODE == "incremental":
+            content_checker = get_content_checker("zhihu")
+            stats = content_checker.get_stats()
+            utils.logger.info(f"[ZhihuCrawler.get_user_collections] Incremental mode completed. Total existing content: {stats['total_existing']}")
+
+        utils.logger.info(f"[ZhihuCrawler.get_user_collections] Finished processing all collections (Mode: {config.CRAWL_MODE})")
 
     async def get_collection_contents(self, collection_id: str, collection_title: str):
         """
@@ -497,6 +512,13 @@ class ZhihuCrawler(AbstractCrawler):
 
                     utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Processing {content_type}: {content_title}")
 
+                    # 增量模式：检查内容是否已存在
+                    if config.CRAWL_MODE == "incremental":
+                        content_checker = get_content_checker("zhihu")
+                        if await content_checker.content_exists(content_id):
+                            utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Content {content_id} already exists, skipping...")
+                            continue
+
                     # 根据内容类型处理
                     if content_type == "answer":
                         # 处理回答
@@ -544,6 +566,11 @@ class ZhihuCrawler(AbstractCrawler):
                         all_contents.append(zhihu_content)
                         # 保存内容（包含图片信息）
                         await zhihu_store.update_zhihu_content(zhihu_content, images_info)
+
+                        # 增量模式：更新已处理内容ID缓存
+                        if config.CRAWL_MODE == "incremental":
+                            content_checker = get_content_checker("zhihu")
+                            content_checker.add_content_id(zhihu_content.content_id)
 
                         # 添加延迟避免请求过快
                         await asyncio.sleep(0.5)

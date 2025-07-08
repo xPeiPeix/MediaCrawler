@@ -33,6 +33,18 @@ async def query_content_by_content_id(content_id: str) -> Dict:
     return dict()
 
 
+async def query_all_content_ids() -> List[str]:
+    """
+    查询所有已存在的内容ID列表（用于增量爬取）
+    Returns:
+        List[str]: 内容ID列表
+    """
+    async_db_conn: AsyncMysqlDB = media_crawler_db_var.get()
+    sql: str = "select content_id from zhihu_content"
+    rows: List[Dict] = await async_db_conn.query(sql)
+    return [row.get("content_id", "") for row in rows if row.get("content_id")]
+
+
 async def add_new_content(content_item: Dict) -> int:
     """
     新增一条内容记录（zhihu的帖子 ｜ 抖音的视频 ｜ 微博 ｜ 快手视频 ...）
