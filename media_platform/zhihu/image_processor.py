@@ -58,13 +58,46 @@ class ZhihuImageProcessor:
             # 使用BeautifulSoup解析HTML
             soup = BeautifulSoup(html_content, 'html.parser')
 
-            # 方法1：查找所有img标签
-            img_tags = soup.find_all('img')
+            # 首先尝试定位正文区域
+            content_container = self._find_content_container(soup)
+            if not content_container:
+                utils.logger.warning("[ZhihuImageProcessor.extract_images_from_html] Could not find content container, using full page")
+                content_container = soup
 
-            for idx, img in enumerate(img_tags):
-                src = img.get('src') or img.get('data-src') or img.get('data-original')
-                if not src:
-                    continue
+            # 方法1：只从正文区域的figure标签中查找img标签
+            # 基于用户提供的信息，只提取figure标签内的图片
+            figure_tags = content_container.find_all('figure')
+            utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Found {len(figure_tags)} figure tags in content area")
+
+            for figure_idx, figure in enumerate(figure_tags):
+                utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Processing figure {figure_idx + 1}")
+                img_tags_in_figure = figure.find_all('img')
+                utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Found {len(img_tags_in_figure)} img tags in figure {figure_idx + 1}")
+
+                for img_idx, img in enumerate(img_tags_in_figure):
+                    # 尝试多种属性获取图片URL
+                    src_candidates = [
+                        img.get('src'),
+                        img.get('data-src'),
+                        img.get('data-original'),
+                        img.get('data-actualsrc')
+                    ]
+                    src = None
+                    for candidate in src_candidates:
+                        if candidate:
+                            src = candidate
+                            break
+
+                    utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Figure {figure_idx + 1}, img {img_idx + 1}: src={src}")
+
+                    if not src:
+                        utils.logger.warning(f"[ZhihuImageProcessor.extract_images_from_html] No valid src found for img {img_idx + 1} in figure {figure_idx + 1}")
+                        continue
+
+                    # 跳过头像和无关图片（额外保险）
+                    if self._is_avatar_or_irrelevant_image(img):
+                        utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Skipping img {img_idx + 1} in figure {figure_idx + 1}: detected as avatar/irrelevant")
+                        continue
 
                 # 处理相对路径
                 if src.startswith('//'):
@@ -76,6 +109,7 @@ class ZhihuImageProcessor:
 
                 # 过滤掉一些不需要的图片
                 if self._should_skip_image(src):
+                    utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Skipping img {img_idx + 1} in figure {figure_idx + 1}: URL pattern matched skip rules")
                     continue
 
                 # 获取图片信息
@@ -90,12 +124,15 @@ class ZhihuImageProcessor:
                     'alt': alt_text,
                     'title': title,
                     'extension': extension,
-                    'filename': f"image_{idx:03d}.{extension}"
+                    'filename': f"image_{len(images):03d}.{extension}"
                 })
+                utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Successfully added img {img_idx + 1} from figure {figure_idx + 1}: {src}")
 
             # 方法2：从知乎的JavaScript数据中提取图片（针对知乎特殊处理）
-            zhihu_images = self._extract_zhihu_images_from_js(html_content)
-            images.extend(zhihu_images)
+            # 注意：暂时禁用JS提取，因为它可能包含页面上所有图片，包括头像
+            # zhihu_images = self._extract_zhihu_images_from_js(html_content)
+            # images.extend(zhihu_images)
+            utils.logger.info("[ZhihuImageProcessor.extract_images_from_html] Skipping JS image extraction to avoid non-content images")
 
         except Exception as e:
             utils.logger.error(f"[ZhihuImageProcessor.extract_images_from_html] Error parsing HTML: {e}")
@@ -287,3 +324,128 @@ class ZhihuImageProcessor:
         utils.logger.info(f"[ZhihuImageProcessor.process_content_images] Successfully downloaded {len(downloaded_images)} images for content {content_id}")
         
         return downloaded_images
+
+    def _find_content_container(self, soup):
+        """
+        定位知乎页面的正文内容容器
+
+        Args:
+            soup: BeautifulSoup对象
+
+        Returns:
+            正文容器元素，如果找不到则返回None
+        """
+        # 基于用户提供的信息，精确定位知乎正文容器
+        content_selectors = [
+            # 最精确的正文容器（基于用户提供的HTML结构）
+            'span.RichText.ztext.CopyrightRichText-richText',
+            '.RichText.ztext',
+            '.CopyrightRichText-richText',
+            # 备用选择器
+            '.RichContent-inner',
+            '.RichText',
+            '.AnswerItem .RichContent',
+            '.QuestionAnswer-content .RichContent',
+            # 文章内容
+            '.Post-RichTextContainer',
+            '.ArticleItem .RichContent',
+            # 通用内容容器
+            '[data-za-detail-view-element_name="AnswerItem"]',
+            '.ContentItem-main'
+        ]
+
+        for selector in content_selectors:
+            container = soup.select_one(selector)
+            if container:
+                utils.logger.info(f"[ZhihuImageProcessor._find_content_container] Found content container using selector: {selector}")
+                return container
+
+        # 如果都找不到，尝试通过ID定位
+        content_by_id = soup.find(id='content')
+        if content_by_id:
+            # 在content内查找RichText容器
+            rich_text = content_by_id.find('span', class_='RichText')
+            if rich_text:
+                utils.logger.info("[ZhihuImageProcessor._find_content_container] Found content container by ID and RichText class")
+                return rich_text
+
+        return None
+
+    def _is_avatar_or_irrelevant_image(self, img_tag):
+        """
+        判断图片是否为头像或其他无关图片
+
+        Args:
+            img_tag: BeautifulSoup的img标签对象
+
+        Returns:
+            True表示应该跳过，False表示保留
+        """
+        # 检查图片的src属性
+        src = img_tag.get('src', '') or img_tag.get('data-src', '') or img_tag.get('data-original', '')
+
+        # 头像相关的URL特征
+        avatar_patterns = [
+            'avatar',
+            'profile',
+            'user',
+            'author',
+            '/people/',
+            'userinfo',
+            'portrait',
+            'headimg'
+        ]
+
+        # 检查URL是否包含头像特征
+        src_lower = src.lower()
+        for pattern in avatar_patterns:
+            if pattern in src_lower:
+                return True
+
+        # 检查图片的class属性
+        img_classes = img_tag.get('class', [])
+        if isinstance(img_classes, list):
+            class_str = ' '.join(img_classes).lower()
+        else:
+            class_str = str(img_classes).lower()
+
+        avatar_class_patterns = [
+            'avatar',
+            'profile',
+            'author',
+            'user',
+            'portrait'
+        ]
+
+        for pattern in avatar_class_patterns:
+            if pattern in class_str:
+                return True
+
+        # 检查父元素的class
+        parent = img_tag.parent
+        if parent:
+            parent_classes = parent.get('class', [])
+            if isinstance(parent_classes, list):
+                parent_class_str = ' '.join(parent_classes).lower()
+            else:
+                parent_class_str = str(parent_classes).lower()
+
+            for pattern in avatar_class_patterns:
+                if pattern in parent_class_str:
+                    return True
+
+        # 检查图片尺寸（如果有的话）
+        width = img_tag.get('width')
+        height = img_tag.get('height')
+
+        if width and height:
+            try:
+                w = int(width)
+                h = int(height)
+                # 头像通常是小尺寸的正方形或接近正方形
+                if w <= 100 and h <= 100 and abs(w - h) <= 20:
+                    return True
+            except (ValueError, TypeError):
+                pass
+
+        return False

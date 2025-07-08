@@ -22,7 +22,7 @@ class ZhihuContent(BaseModel):
     content_id: str = Field(default="", description="内容ID")
     content_type: str = Field(default="", description="内容类型(article | answer | zvideo)")
     content_text: str = Field(default="", description="内容文本, 如果是视频类型这里为空")
-    content_html: str = Field(default="", description="原始HTML内容, 用于图片处理")
+
     content_url: str = Field(default="", description="内容落地链接")
     has_images: bool = Field(default=False, description="是否包含图片")
     images_processed: bool = Field(default=False, description="图片是否已处理")

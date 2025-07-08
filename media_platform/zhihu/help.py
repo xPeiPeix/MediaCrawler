@@ -100,10 +100,9 @@ class ZhihuExtractor:
         res.content_id = answer.get("id")
         res.content_type = answer.get("type")
     
-        # 保留原始HTML内容用于图片处理，同时提取纯文本
+        # 提取纯文本内容
         original_content = answer.get("content", "")
         res.content_text = extract_text_from_html(original_content)
-        res.content_html = original_content
 
         res.question_id = answer.get("question").get("id")
         res.content_url = f"{zhihu_constant.ZHIHU_URL}/question/{res.question_id}/answer/{res.content_id}"
@@ -136,10 +135,9 @@ class ZhihuExtractor:
         res.content_id = article.get("id")
         res.content_type = article.get("type")
 
-        # 保留原始HTML内容用于图片处理，同时提取纯文本
+        # 提取纯文本内容
         original_content = article.get("content", "")
         res.content_text = extract_text_from_html(original_content)
-        res.content_html = original_content
 
         res.content_url = f"{zhihu_constant.ZHIHU_ZHUANLAN_URL}/p/{res.content_id}"
         res.title = extract_text_from_html(article.get("title"))
@@ -408,9 +406,7 @@ class ZhihuExtractor:
         # 提取内容
         zhihu_content = self._extract_answer_content(answer_info.get(list(answer_info.keys())[0]))
 
-        # 保留原始HTML内容用于图片处理
-        if zhihu_content:
-            zhihu_content.content_html = html_content
+
 
         return zhihu_content
 
@@ -434,9 +430,7 @@ class ZhihuExtractor:
         # 提取内容
         zhihu_content = self._extract_article_content(article_info.get(list(article_info.keys())[0]))
 
-        # 保留原始HTML内容用于图片处理
-        if zhihu_content:
-            zhihu_content.content_html = html_content
+
 
         return zhihu_content
 

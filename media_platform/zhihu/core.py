@@ -753,11 +753,9 @@ class ZhihuCrawler(AbstractCrawler):
         # 检测图片占位符
         has_image_placeholder = "[图片]" in desc or "[图片]" in content
 
-        # 检测HTML中是否有图片标签（如果有HTML内容）
-        html_content = getattr(zhihu_content, 'content_html', '') or ""
-        has_img_tag = "<img" in html_content.lower() if html_content else False
+        # 主要通过占位符检测图片，HTML检测在浏览器阶段进行
 
-        result = has_image_placeholder or has_img_tag
+        result = has_image_placeholder
 
         if result:
             utils.logger.info(f"[ZhihuCrawler._detect_images_in_content] Detected images in content {zhihu_content.content_id}")
@@ -788,7 +786,6 @@ class ZhihuCrawler(AbstractCrawler):
 
             # 获取页面HTML
             page_html = await self.context_page.content()
-            zhihu_content.content_html = page_html
 
             utils.logger.info(f"[ZhihuCrawler._process_images_with_browser] Got HTML content, length: {len(page_html)}")
 
@@ -862,10 +859,10 @@ class ZhihuCrawler(AbstractCrawler):
             return []
 
         try:
-            # 转换为字典格式，使用HTML内容进行图片处理
+            # 转换为字典格式进行图片处理
             content_dict = {
                 'content_id': zhihu_content.content_id,
-                'content_text': getattr(zhihu_content, 'content_html', '') or zhihu_content.content_text,
+                'content_text': zhihu_content.content_text,
                 'content_url': zhihu_content.content_url,
                 'title': zhihu_content.title
             }
