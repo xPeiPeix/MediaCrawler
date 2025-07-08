@@ -535,6 +535,43 @@ class ZhiHuClient(AbstractApiClient):
         response_html = await self.get(uri, return_response=True)
         return self._extractor.extract_article_content_from_html(response_html)
 
+    async def get_user_collections(self, user_id: str, offset: int = 0, limit: int = 20) -> Dict:
+        """
+        获取用户的收藏夹列表
+        Args:
+            user_id: 用户ID
+            offset: 偏移量
+            limit: 每页数量
+
+        Returns:
+            收藏夹列表数据
+        """
+        uri = f"/api/v4/people/{user_id}/collections"
+        params = {
+            "include": "data[*].updated_time,answer_count,follower_count,creator,description,is_following,comment_count,created_time;data[*].creator.kvip_info;data[*].creator.vip_info",
+            "offset": offset,
+            "limit": limit
+        }
+        return await self.get(uri, params)
+
+    async def get_collection_items(self, collection_id: str, offset: int = 0, limit: int = 20) -> Dict:
+        """
+        获取收藏夹中的内容列表
+        Args:
+            collection_id: 收藏夹ID
+            offset: 偏移量
+            limit: 每页数量
+
+        Returns:
+            收藏夹内容列表数据
+        """
+        uri = f"/api/v4/collections/{collection_id}/items"
+        params = {
+            "offset": offset,
+            "limit": limit
+        }
+        return await self.get(uri, params)
+
     async def get_video_info(self, video_id: str) -> Optional[ZhihuContent]:
         """
         获取视频信息

@@ -19,7 +19,7 @@ SORT_TYPE = "popularity_descending"
 # 具体值参见media_platform.xxx.field下的枚举值，暂时只支持抖音
 PUBLISH_TIME_TYPE = 0
 CRAWLER_TYPE = (
-    "search"  # 爬取类型，search(关键词搜索) | detail(帖子详情)| creator(创作者主页数据)
+    "search"  # 爬取类型，search(关键词搜索) | detail(帖子详情)| creator(创作者主页数据) | collection(收藏夹数据，仅支持知乎)
 )
 # 微博搜索类型 default (综合) | real_time (实时) | popular (热门) | video (视频)
 WEIBO_SEARCH_TYPE = "popular"

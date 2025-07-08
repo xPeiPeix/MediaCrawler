@@ -113,6 +113,9 @@ class ZhihuCrawler(AbstractCrawler):
             elif config.CRAWLER_TYPE == "creator":
                 # Get creator's information and their notes and comments
                 await self.get_creators_and_notes()
+            elif config.CRAWLER_TYPE == "collection":
+                # Get user's collection information and their contents
+                await self.get_user_collections()
             else:
                 pass
 
@@ -402,6 +405,323 @@ class ZhihuCrawler(AbstractCrawler):
             # 回退到标准模式
             chromium = playwright.chromium
             return await self.launch_browser(chromium, playwright_proxy, user_agent, headless)
+
+    async def get_user_collections(self):
+        """
+        获取用户收藏夹数据
+        """
+        utils.logger.info("[ZhihuCrawler.get_user_collections] Begin get user collections ...")
+
+        # 获取当前用户信息
+        current_user_info = await self.zhihu_client.get_current_user_info()
+        user_id = current_user_info.get("id")
+        if not user_id:
+            utils.logger.error("[ZhihuCrawler.get_user_collections] Failed to get current user id")
+            return
+
+        utils.logger.info(f"[ZhihuCrawler.get_user_collections] Current user id: {user_id}")
+
+        # 获取用户收藏夹列表
+        collections_data = await self.zhihu_client.get_user_collections(user_id)
+        collections = collections_data.get("data", [])
+
+        if not collections:
+            utils.logger.info("[ZhihuCrawler.get_user_collections] No collections found")
+            return
+
+        utils.logger.info(f"[ZhihuCrawler.get_user_collections] Found {len(collections)} collections")
+
+        # 遍历每个收藏夹
+        for collection in collections:
+            collection_id = collection.get("id")
+            collection_title = collection.get("title", "未知收藏夹")
+            collection_count = collection.get("answer_count", 0)
+
+            utils.logger.info(f"[ZhihuCrawler.get_user_collections] Processing collection: {collection_title} (ID: {collection_id}, Count: {collection_count})")
+
+            if collection_count == 0:
+                utils.logger.info(f"[ZhihuCrawler.get_user_collections] Collection {collection_title} is empty, skipping")
+                continue
+
+            # 获取收藏夹内容
+            await self.get_collection_contents(collection_id, collection_title)
+
+        utils.logger.info("[ZhihuCrawler.get_user_collections] Finished processing all collections")
+
+    async def get_collection_contents(self, collection_id: str, collection_title: str):
+        """
+        获取指定收藏夹的内容
+        Args:
+            collection_id: 收藏夹ID
+            collection_title: 收藏夹标题
+        """
+        utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Begin get collection contents for: {collection_title}")
+
+        page = 0
+        limit = 20
+        all_contents = []
+
+        # 创建信号量控制并发
+        detail_semaphore = asyncio.Semaphore(3)  # 限制同时获取详情的数量
+
+        while True:
+            offset = page * limit
+            utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Getting page {page + 1} (offset: {offset})")
+
+            try:
+                collection_items = await self.zhihu_client.get_collection_items(
+                    collection_id=collection_id,
+                    offset=offset,
+                    limit=limit
+                )
+
+                items = collection_items.get("data", [])
+                if not items:
+                    utils.logger.info(f"[ZhihuCrawler.get_collection_contents] No more items in collection: {collection_title}")
+                    break
+
+                utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Found {len(items)} items in page {page + 1}")
+
+                # 处理每个收藏项
+                for item in items:
+                    content = item.get("content")
+                    if not content:
+                        continue
+
+                    # 提取内容信息
+                    content_type = content.get("type", "unknown")
+                    content_id = content.get("id")
+                    content_title = content.get("title", "无标题")
+                    content_url = content.get("url", "")
+
+                    utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Processing {content_type}: {content_title}")
+
+                    # 根据内容类型处理
+                    if content_type == "answer":
+                        # 处理回答
+                        zhihu_content = self._extract_answer_from_collection_item(content)
+                    elif content_type == "article":
+                        # 处理文章
+                        zhihu_content = self._extract_article_from_collection_item(content)
+                    else:
+                        utils.logger.warning(f"[ZhihuCrawler.get_collection_contents] Unsupported content type: {content_type}")
+                        continue
+
+                    if zhihu_content:
+                        # 尝试获取完整内容详情
+                        try:
+                            full_content = await self._get_full_content_detail(
+                                content_url, content_type, detail_semaphore
+                            )
+
+                            if full_content:
+                                # 合并完整内容到收藏数据中，保留收藏的元数据
+                                zhihu_content.content_text = full_content.content_text or zhihu_content.content_text
+                                zhihu_content.desc = full_content.desc or zhihu_content.desc
+                                # 更新其他可能的字段
+                                if full_content.voteup_count:
+                                    zhihu_content.liked_count = full_content.voteup_count
+                                if full_content.comment_count:
+                                    zhihu_content.comments_count = full_content.comment_count
+
+                                utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Successfully got full content for: {content_title}")
+                            else:
+                                utils.logger.warning(f"[ZhihuCrawler.get_collection_contents] Failed to get full content for: {content_title}")
+
+                        except Exception as e:
+                            utils.logger.error(f"[ZhihuCrawler.get_collection_contents] Error getting full content for {content_title}: {e}")
+
+                        all_contents.append(zhihu_content)
+                        # 保存内容
+                        await zhihu_store.update_zhihu_content(zhihu_content)
+
+                        # 添加延迟避免请求过快
+                        await asyncio.sleep(0.5)
+
+                page += 1
+
+                # 添加延迟避免请求过快
+                await asyncio.sleep(1)
+
+            except Exception as e:
+                utils.logger.error(f"[ZhihuCrawler.get_collection_contents] Error getting collection items: {e}")
+                break
+
+        utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Finished processing collection: {collection_title}, total items: {len(all_contents)}")
+
+        # 批量获取评论
+        if config.ENABLE_GET_COMMENTS and all_contents:
+            await self.batch_get_content_comments(all_contents)
+
+    def _format_gender_text(self, gender: int) -> str:
+        """
+        格式化性别文本
+        Args:
+            gender: 性别数字
+
+        Returns:
+            性别文本
+        """
+        if gender == 1:
+            return "男"
+        elif gender == 0:
+            return "女"
+        else:
+            return "未知"
+
+    def _parse_content_ids_from_url(self, content_url: str, content_type: str) -> Optional[Dict[str, str]]:
+        """
+        从URL中解析出内容ID
+        Args:
+            content_url: 内容URL
+            content_type: 内容类型
+
+        Returns:
+            包含ID信息的字典
+        """
+        try:
+            if content_type == "answer":
+                # URL格式: https://www.zhihu.com/question/123456/answer/789012
+                parts = content_url.split("/")
+                if len(parts) >= 6:
+                    question_id = parts[-3]
+                    answer_id = parts[-1]
+                    return {"question_id": question_id, "answer_id": answer_id}
+            elif content_type == "article":
+                # URL格式: https://zhuanlan.zhihu.com/p/123456
+                parts = content_url.split("/")
+                if len(parts) >= 2:
+                    article_id = parts[-1]
+                    return {"article_id": article_id}
+            elif content_type == "zvideo":
+                # URL格式: https://www.zhihu.com/zvideo/123456
+                parts = content_url.split("/")
+                if len(parts) >= 2:
+                    video_id = parts[-1]
+                    return {"video_id": video_id}
+        except Exception as e:
+            utils.logger.error(f"[ZhihuCrawler._parse_content_ids_from_url] Error parsing URL {content_url}: {e}")
+
+        return None
+
+    async def _get_full_content_detail(self, content_url: str, content_type: str, semaphore: asyncio.Semaphore) -> Optional[ZhihuContent]:
+        """
+        获取内容的完整详情
+        Args:
+            content_url: 内容URL
+            content_type: 内容类型
+            semaphore: 并发控制信号量
+
+        Returns:
+            完整的内容详情
+        """
+        async with semaphore:
+            try:
+                ids = self._parse_content_ids_from_url(content_url, content_type)
+                if not ids:
+                    utils.logger.warning(f"[ZhihuCrawler._get_full_content_detail] Cannot parse IDs from URL: {content_url}")
+                    return None
+
+                utils.logger.info(f"[ZhihuCrawler._get_full_content_detail] Getting full content for {content_type}: {content_url}")
+
+                if content_type == "answer" and "question_id" in ids and "answer_id" in ids:
+                    return await self.zhihu_client.get_answer_info(ids["question_id"], ids["answer_id"])
+                elif content_type == "article" and "article_id" in ids:
+                    return await self.zhihu_client.get_article_info(ids["article_id"])
+                elif content_type == "zvideo" and "video_id" in ids:
+                    return await self.zhihu_client.get_video_info(ids["video_id"])
+                else:
+                    utils.logger.warning(f"[ZhihuCrawler._get_full_content_detail] Unsupported content type: {content_type}")
+                    return None
+
+            except Exception as e:
+                utils.logger.error(f"[ZhihuCrawler._get_full_content_detail] Error getting full content for {content_url}: {e}")
+                return None
+
+    def _extract_answer_from_collection_item(self, content: Dict) -> Optional[ZhihuContent]:
+        """
+        从收藏项中提取回答信息
+        Args:
+            content: 收藏项内容数据
+
+        Returns:
+            ZhihuContent对象
+        """
+        try:
+            question = content.get("question", {})
+            author = content.get("author", {})
+
+            return ZhihuContent(
+                content_id=str(content.get("id", "")),
+                content_type="answer",
+                content_url=content.get("url", ""),
+                title=question.get("title", ""),
+                desc=content.get("excerpt", ""),
+                note_id=str(content.get("id", "")),
+                create_time=content.get("created_time", 0),
+                update_time=content.get("updated_time", 0),
+                liked_count=content.get("voteup_count", 0),
+                comments_count=content.get("comment_count", 0),
+                shared_count=0,
+                topics=question.get("topics", []),
+                content_url_token=content.get("url", "").split("/")[-1] if content.get("url") else "",
+                author=ZhihuCreator(
+                    user_id=str(author.get("id", "")),
+                    user_nickname=author.get("name", ""),
+                    url_token=author.get("url_token", ""),
+                    user_avatar=author.get("avatar_url", ""),
+                    gender=self._format_gender_text(author.get("gender", -1)),
+                    follows=author.get("follower_count", 0),
+                    fans=author.get("following_count", 0),
+                    voteup_count=author.get("voteup_count", 0),
+                    thanked_count=author.get("thanked_count", 0)
+                )
+            )
+        except Exception as e:
+            utils.logger.error(f"[ZhihuCrawler._extract_answer_from_collection_item] Error extracting answer: {e}")
+            return None
+
+    def _extract_article_from_collection_item(self, content: Dict) -> Optional[ZhihuContent]:
+        """
+        从收藏项中提取文章信息
+        Args:
+            content: 收藏项内容数据
+
+        Returns:
+            ZhihuContent对象
+        """
+        try:
+            author = content.get("author", {})
+
+            return ZhihuContent(
+                content_id=str(content.get("id", "")),
+                content_type="article",
+                content_url=content.get("url", ""),
+                title=content.get("title", ""),
+                desc=content.get("excerpt", ""),
+                note_id=str(content.get("id", "")),
+                create_time=content.get("created", 0),
+                update_time=content.get("updated", 0),
+                liked_count=content.get("voteup_count", 0),
+                comments_count=content.get("comment_count", 0),
+                shared_count=0,
+                topics=[],
+                content_url_token=content.get("url", "").split("/")[-1] if content.get("url") else "",
+                author=ZhihuCreator(
+                    user_id=str(author.get("id", "")),
+                    user_nickname=author.get("name", ""),
+                    url_token=author.get("url_token", ""),
+                    user_avatar=author.get("avatar_url", ""),
+                    gender=self._format_gender_text(author.get("gender", -1)),
+                    follows=author.get("follower_count", 0),
+                    fans=author.get("following_count", 0),
+                    voteup_count=author.get("voteup_count", 0),
+                    thanked_count=author.get("thanked_count", 0)
+                )
+            )
+        except Exception as e:
+            utils.logger.error(f"[ZhihuCrawler._extract_article_from_collection_item] Error extracting article: {e}")
+            return None
 
     async def close(self):
         """Close browser context"""
