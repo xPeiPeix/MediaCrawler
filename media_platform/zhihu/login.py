@@ -72,6 +72,12 @@ class ZhiHuLogin(AbstractLogin):
     async def login_by_qrcode(self):
         """login zhihu website and keep webdriver login state"""
         utils.logger.info("[ZhiHu.login_by_qrcode] Begin login zhihu by qrcode ...")
+
+        # 先检查是否已经登录
+        if await self.check_login_state():
+            utils.logger.info("[ZhiHu.login_by_qrcode] Already logged in, skip qrcode login")
+            return
+
         qrcode_img_selector = "canvas.Qrcode-qrcode"
         # find login qrcode
         base64_qrcode_img = await utils.find_qrcode_img_from_canvas(

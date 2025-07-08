@@ -20,6 +20,7 @@ from parsel import Selector
 from constant import zhihu as zhihu_constant
 from model.m_zhihu import ZhihuComment, ZhihuContent, ZhihuCreator
 from tools.crawler_util import extract_text_from_html
+from tools import utils
 
 ZHIHU_SGIN_JS = None
 
@@ -98,7 +99,12 @@ class ZhihuExtractor:
         res = ZhihuContent()
         res.content_id = answer.get("id")
         res.content_type = answer.get("type")
-        res.content_text = extract_text_from_html(answer.get("content", ""))
+    
+        # 保留原始HTML内容用于图片处理，同时提取纯文本
+        original_content = answer.get("content", "")
+        res.content_text = extract_text_from_html(original_content)
+        res.content_html = original_content
+
         res.question_id = answer.get("question").get("id")
         res.content_url = f"{zhihu_constant.ZHIHU_URL}/question/{res.question_id}/answer/{res.content_id}"
         res.title = extract_text_from_html(answer.get("title", ""))
@@ -129,7 +135,12 @@ class ZhihuExtractor:
         res = ZhihuContent()
         res.content_id = article.get("id")
         res.content_type = article.get("type")
-        res.content_text = extract_text_from_html(article.get("content"))
+
+        # 保留原始HTML内容用于图片处理，同时提取纯文本
+        original_content = article.get("content", "")
+        res.content_text = extract_text_from_html(original_content)
+        res.content_html = original_content
+
         res.content_url = f"{zhihu_constant.ZHIHU_ZHUANLAN_URL}/p/{res.content_id}"
         res.title = extract_text_from_html(article.get("title"))
         res.desc = extract_text_from_html(article.get("excerpt"))
@@ -394,7 +405,14 @@ class ZhihuExtractor:
         if not answer_info:
             return None
 
-        return self._extract_answer_content(answer_info.get(list(answer_info.keys())[0]))
+        # 提取内容
+        zhihu_content = self._extract_answer_content(answer_info.get(list(answer_info.keys())[0]))
+
+        # 保留原始HTML内容用于图片处理
+        if zhihu_content:
+            zhihu_content.content_html = html_content
+
+        return zhihu_content
 
     def extract_article_content_from_html(self, html_content: str) -> Optional[ZhihuContent]:
         """
@@ -413,7 +431,14 @@ class ZhihuExtractor:
         if not article_info:
             return None
 
-        return self._extract_article_content(article_info.get(list(article_info.keys())[0]))
+        # 提取内容
+        zhihu_content = self._extract_article_content(article_info.get(list(article_info.keys())[0]))
+
+        # 保留原始HTML内容用于图片处理
+        if zhihu_content:
+            zhihu_content.content_html = html_content
+
+        return zhihu_content
 
     def extract_zvideo_content_from_html(self, html_content: str) -> Optional[ZhihuContent]:
         """
