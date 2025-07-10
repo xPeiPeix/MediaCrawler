@@ -185,15 +185,48 @@ def format_proxy_info(ip_proxy_info) -> Tuple[Optional[Dict], Optional[Dict]]:
 
 
 def extract_text_from_html(html: str) -> str:
-    """Extract text from HTML, removing all tags."""
+    """Extract text from HTML, removing all tags but preserving image placeholders."""
     if not html:
         return ""
 
     # Remove script and style elements
     clean_html = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', html, flags=re.DOTALL)
+
+    # Convert img tags to [图片] placeholders before removing other tags
+    # This preserves the position of images in the text
+    clean_html = re.sub(r'<img[^>]*>', '[图片]', clean_html)
+
     # Remove all other tags
     clean_text = re.sub(r'<[^>]+>', '', clean_html).strip()
     return clean_text
+
+
+def replace_image_placeholders_with_filenames(content_text: str, image_list: List[Dict]) -> str:
+    """
+    将内容文本中的[图片]占位符替换为真实的图片文件名
+    Args:
+        content_text: 包含[图片]占位符的文本内容
+        image_list: 图片信息列表，每个元素包含filename字段
+
+    Returns:
+        替换后的文本内容
+    """
+    if not content_text or not image_list:
+        return content_text
+
+    result_text = content_text
+
+    # 按顺序替换每个[图片]占位符
+    for i, image_info in enumerate(image_list):
+        filename = image_info.get('filename', f'image_{i:03d}')
+        placeholder = '[图片]'
+        replacement = f'[pic:{filename}]'
+
+        # 只替换第一个匹配的占位符，确保顺序正确
+        result_text = result_text.replace(placeholder, replacement, 1)
+
+    return result_text
+
 
 def extract_url_params_to_dict(url: str) -> Dict:
     """Extract URL parameters to dict"""

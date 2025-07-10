@@ -28,6 +28,7 @@ from store import zhihu as zhihu_store
 from tools import utils
 from tools.cdp_browser import CDPBrowserManager
 from tools.content_checker import get_content_checker
+from tools.crawler_util import replace_image_placeholders_with_filenames
 from var import crawler_type_var, source_keyword_var
 
 from .client import ZhiHuClient
@@ -562,6 +563,13 @@ class ZhihuCrawler(AbstractCrawler):
                         if config.ENABLE_GET_IMAGES and zhihu_content.has_images:
                             images_info = await self._process_images_with_browser(zhihu_content)
                             zhihu_content.images_processed = True
+
+                            # 将content_text中的[图片]占位符替换为真实的图片文件名
+                            if images_info and zhihu_content.content_text:
+                                zhihu_content.content_text = replace_image_placeholders_with_filenames(
+                                    zhihu_content.content_text, images_info
+                                )
+                                utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Replaced {len(images_info)} image placeholders in content {content_id}")
 
                         all_contents.append(zhihu_content)
                         # 保存内容（包含图片信息）
