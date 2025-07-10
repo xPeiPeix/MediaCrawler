@@ -198,6 +198,10 @@ def extract_text_from_html(html: str) -> str:
 
     # Remove all other tags
     clean_text = re.sub(r'<[^>]+>', '', clean_html).strip()
+
+    # Clean up extra whitespace and newlines
+    clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+
     return clean_text
 
 
@@ -211,19 +215,27 @@ def replace_image_placeholders_with_filenames(content_text: str, image_list: Lis
     Returns:
         替换后的文本内容
     """
-    if not content_text or not image_list:
+    if not content_text:
         return content_text
 
     result_text = content_text
 
-    # 按顺序替换每个[图片]占位符
-    for i, image_info in enumerate(image_list):
-        filename = image_info.get('filename', f'image_{i:03d}')
-        placeholder = '[图片]'
-        replacement = f'[pic:{filename}]'
+    # 如果有图片，按顺序替换对应数量的[图片]占位符
+    if image_list:
+        for i, image_info in enumerate(image_list):
+            filename = image_info.get('filename', f'image_{i:03d}')
+            placeholder = '[图片]'
+            replacement = f'[pic:{filename}]'
 
-        # 只替换第一个匹配的占位符，确保顺序正确
-        result_text = result_text.replace(placeholder, replacement, 1)
+            # 只替换第一个匹配的占位符，确保顺序正确
+            result_text = result_text.replace(placeholder, replacement, 1)
+
+    # 移除所有剩余的[图片]占位符（没有对应图片文件的）
+    result_text = result_text.replace('[图片]', '')
+
+    # 清理可能的多余空格和换行
+    import re
+    result_text = re.sub(r'\s+', ' ', result_text).strip()
 
     return result_text
 
