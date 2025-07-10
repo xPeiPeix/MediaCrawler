@@ -45,7 +45,7 @@ class KuaiShouClient(AbstractApiClient):
         self.graphql = KuaiShouGraphQL()
 
     async def request(self, method, url, **kwargs) -> Any:
-        async with httpx.AsyncClient(proxies=self.proxies) as client:
+        async with httpx.AsyncClient(proxy=self.proxies) as client:
             response = await client.request(method, url, timeout=self.timeout, **kwargs)
         data: Dict = response.json()
         if data.get("errors"):

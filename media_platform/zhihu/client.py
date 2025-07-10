@@ -79,7 +79,7 @@ class ZhiHuClient(AbstractApiClient):
         # return response.text
         return_response = kwargs.pop('return_response', False)
 
-        async with httpx.AsyncClient(proxies=self.proxies, ) as client:
+        async with httpx.AsyncClient(proxy=self.proxies, ) as client:
             response = await client.request(
                 method, url, timeout=self.timeout,
                 **kwargs
