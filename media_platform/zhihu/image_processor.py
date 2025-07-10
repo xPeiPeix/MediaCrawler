@@ -99,36 +99,36 @@ class ZhihuImageProcessor:
                         utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Skipping img {img_idx + 1} in figure {figure_idx + 1}: detected as avatar/irrelevant")
                         continue
 
-                # 处理相对路径
-                if src.startswith('//'):
-                    src = 'https:' + src
-                elif src.startswith('/'):
-                    src = urljoin(base_url, src)
-                elif not src.startswith(('http://', 'https://')):
-                    src = urljoin(base_url, src)
+                    # 处理相对路径
+                    if src.startswith('//'):
+                        src = 'https:' + src
+                    elif src.startswith('/'):
+                        src = urljoin(base_url, src)
+                    elif not src.startswith(('http://', 'https://')):
+                        src = urljoin(base_url, src)
 
-                # 过滤掉一些不需要的图片
-                if self._should_skip_image(src):
-                    # 对于data:协议的URL，只显示前50个字符避免日志过长
-                    display_url = src[:50] + "..." if src.startswith('data:') and len(src) > 50 else src
-                    utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Skipping img {img_idx + 1} in figure {figure_idx + 1}: {display_url} (filtered by skip rules)")
-                    continue
+                    # 过滤掉一些不需要的图片
+                    if self._should_skip_image(src):
+                        # 对于data:协议的URL，只显示前50个字符避免日志过长
+                        display_url = src[:50] + "..." if src.startswith('data:') and len(src) > 50 else src
+                        utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Skipping img {img_idx + 1} in figure {figure_idx + 1}: {display_url} (filtered by skip rules)")
+                        continue
 
-                # 获取图片信息
-                alt_text = img.get('alt', '')
-                title = img.get('title', '')
+                    # 获取图片信息
+                    alt_text = img.get('alt', '')
+                    title = img.get('title', '')
 
-                # 推断文件扩展名
-                extension = self._get_image_extension(src)
+                    # 推断文件扩展名
+                    extension = self._get_image_extension(src)
 
-                images.append({
-                    'url': src,
-                    'alt': alt_text,
-                    'title': title,
-                    'extension': extension,
-                    'filename': f"image_{len(images):03d}.{extension}"
-                })
-                utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Successfully added img {img_idx + 1} from figure {figure_idx + 1}: {src}")
+                    images.append({
+                        'url': src,
+                        'alt': alt_text,
+                        'title': title,
+                        'extension': extension,
+                        'filename': f"image_{len(images):03d}.{extension}"
+                    })
+                    utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Successfully added img {img_idx + 1} from figure {figure_idx + 1}: {src}")
 
             # 方法2：从知乎的JavaScript数据中提取图片（针对知乎特殊处理）
             # 注意：暂时禁用JS提取，因为它可能包含页面上所有图片，包括头像
