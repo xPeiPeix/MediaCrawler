@@ -53,6 +53,7 @@ class ZhihuImageProcessor:
             return []
 
         images = []
+        seen_image_ids = set()  # 用于去重的图片ID集合
 
         try:
             # 使用BeautifulSoup解析HTML
@@ -114,6 +115,18 @@ class ZhihuImageProcessor:
                         utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Skipping img {img_idx + 1} in figure {figure_idx + 1}: {display_url} (filtered by skip rules)")
                         continue
 
+                    # 提取知乎图片ID（用于去重）
+                    image_id = self._extract_zhihu_image_id(src)
+
+                    # 如果已经处理过相同ID的图片，则跳过
+                    if image_id and image_id in seen_image_ids:
+                        utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Skipping duplicate image {img_idx + 1} in figure {figure_idx + 1}: {image_id}")
+                        continue
+
+                    # 如果有有效的图片ID，添加到已处理集合
+                    if image_id:
+                        seen_image_ids.add(image_id)
+
                     # 获取图片信息
                     alt_text = img.get('alt', '')
                     title = img.get('title', '')
@@ -126,7 +139,8 @@ class ZhihuImageProcessor:
                         'alt': alt_text,
                         'title': title,
                         'extension': extension,
-                        'filename': f"image_{len(images):03d}.{extension}"
+                        'filename': f"image_{len(images):03d}.{extension}",
+                        'image_id': image_id  # 保存图片ID用于后续处理
                     })
                     utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Successfully added img {img_idx + 1} from figure {figure_idx + 1}: {src}")
 
@@ -218,7 +232,40 @@ class ZhihuImageProcessor:
                 return True
 
         return False
-    
+
+    def _extract_zhihu_image_id(self, url: str) -> str:
+        """
+        从知乎图片URL中提取唯一的图片ID
+        Args:
+            url: 图片URL
+
+        Returns:
+            图片ID，如果无法提取则返回空字符串
+        """
+        if not url:
+            return ""
+
+        # 知乎图片URL格式：https://pic1.zhimg.com/80/v2-abc123def456_720w.webp
+        # 提取其中的 v2-abc123def456 部分作为唯一标识
+        import re
+
+        # 匹配知乎图片ID模式
+        pattern = r'/(v2-[a-f0-9]+)_'
+        match = re.search(pattern, url)
+
+        if match:
+            return match.group(1)
+
+        # 如果没有匹配到标准格式，尝试其他可能的格式
+        pattern2 = r'/(v2-[a-f0-9]+)\.'
+        match2 = re.search(pattern2, url)
+
+        if match2:
+            return match2.group(1)
+
+        # 如果都没有匹配到，返回空字符串（不进行去重）
+        return ""
+
     def _get_image_extension(self, url: str) -> str:
         """
         从URL中获取图片扩展名
