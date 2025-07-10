@@ -290,6 +290,16 @@ python main.py --help
 </div>
 
 
+## 📝 更新历史
+
+### 2025-07-10
+- ✅ **知乎收藏夹爬虫增强**
+  - 修复question_id字段缺失问题，现可正确获取问题ID构建完整URL
+  - 修复created_time和updated_time字段为0的问题，现可获取真实时间
+  - 新增时间格式自动转换功能，输出人类可读的日期格式（YYYY-MM-DD HH:MM:SS）
+  - 修复httpx兼容性问题和字段名不匹配问题
+  - 提升数据完整性和可用性
+
 ## 🙏 致谢
 
 ### JetBrains 开源许可证支持

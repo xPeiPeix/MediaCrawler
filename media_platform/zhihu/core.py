@@ -542,11 +542,27 @@ class ZhihuCrawler(AbstractCrawler):
                                 # 合并完整内容到收藏数据中，保留收藏的元数据
                                 zhihu_content.content_text = full_content.content_text or zhihu_content.content_text
                                 zhihu_content.desc = full_content.desc or zhihu_content.desc
+
+                                # 更新时间字段（如果完整内容中有有效时间）
+                                if full_content.created_time and full_content.created_time > 0:
+                                    zhihu_content.created_time = full_content.created_time
+                                if full_content.updated_time and full_content.updated_time > 0:
+                                    zhihu_content.updated_time = full_content.updated_time
+
+                                # 更新question_id（仅对回答类型）
+                                if content_type == "answer" and full_content.question_id:
+                                    zhihu_content.question_id = full_content.question_id
+
                                 # 更新其他可能的字段
                                 if full_content.voteup_count:
-                                    zhihu_content.liked_count = full_content.voteup_count
+                                    zhihu_content.voteup_count = full_content.voteup_count
                                 if full_content.comment_count:
-                                    zhihu_content.comments_count = full_content.comment_count
+                                    zhihu_content.comment_count = full_content.comment_count
+
+                                # 更新作者信息（如果完整内容中有更详细的作者信息）
+                                if hasattr(full_content, 'author') and full_content.author and hasattr(full_content.author, 'user_id'):
+                                    if hasattr(zhihu_content, 'author'):
+                                        zhihu_content.author = full_content.author
 
                                 utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Successfully got full content for: {content_title}")
                             else:
@@ -707,8 +723,8 @@ class ZhihuCrawler(AbstractCrawler):
                 title=question.get("title", ""),
                 desc=content.get("excerpt", ""),
                 note_id=str(content.get("id", "")),
-                create_time=content.get("created_time", 0),
-                update_time=content.get("updated_time", 0),
+                created_time=content.get("created_time", 0),
+                updated_time=content.get("updated_time", 0),
                 liked_count=content.get("voteup_count", 0),
                 comments_count=content.get("comment_count", 0),
                 shared_count=0,
@@ -749,8 +765,8 @@ class ZhihuCrawler(AbstractCrawler):
                 title=content.get("title", ""),
                 desc=content.get("excerpt", ""),
                 note_id=str(content.get("id", "")),
-                create_time=content.get("created", 0),
-                update_time=content.get("updated", 0),
+                created_time=content.get("created", 0),
+                updated_time=content.get("updated", 0),
                 liked_count=content.get("voteup_count", 0),
                 comments_count=content.get("comment_count", 0),
                 shared_count=0,

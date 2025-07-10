@@ -52,6 +52,23 @@ async def batch_update_zhihu_contents(contents: List[ZhihuContent]):
     for content_item in contents:
         await update_zhihu_content(content_item)
 
+def _convert_timestamp_to_readable(timestamp):
+    """
+    将时间戳转换为可读格式
+    Args:
+        timestamp: 时间戳（int或float），如果为0则保持不变
+    Returns:
+        str: 可读的时间格式或0
+    """
+    if timestamp == 0:
+        return 0
+    try:
+        from tools.time_util import get_time_str_from_unix_time
+        return get_time_str_from_unix_time(timestamp)
+    except Exception:
+        return timestamp
+
+
 async def update_zhihu_content(content_item: ZhihuContent, images_info: List[Dict] = None):
     """
     更新知乎内容
@@ -64,7 +81,14 @@ async def update_zhihu_content(content_item: ZhihuContent, images_info: List[Dic
     """
     content_item.source_keyword = source_keyword_var.get()
     local_db_item = content_item.model_dump()
-    local_db_item.update({"last_modify_ts": utils.get_current_timestamp()})
+
+    # 转换时间戳为可读格式
+    local_db_item["created_time"] = _convert_timestamp_to_readable(local_db_item.get("created_time", 0))
+    local_db_item["updated_time"] = _convert_timestamp_to_readable(local_db_item.get("updated_time", 0))
+
+    # last_modify_ts 使用可读格式
+    from tools.time_util import get_current_time
+    local_db_item.update({"last_modify_ts": get_current_time()})
 
     # 添加图片信息到数据中
     if images_info:

@@ -10,7 +10,7 @@
 
 
 # -*- coding: utf-8 -*-
-from typing import Optional
+from typing import Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -29,8 +29,8 @@ class ZhihuContent(BaseModel):
     question_id: str = Field(default="", description="问题ID, type为answer时有值")
     title: str = Field(default="", description="内容标题")
     desc: str = Field(default="", description="内容描述")
-    created_time: int = Field(default=0, description="创建时间")
-    updated_time: int = Field(default=0, description="更新时间")
+    created_time: Union[int, str] = Field(default=0, description="创建时间")
+    updated_time: Union[int, str] = Field(default=0, description="更新时间")
     voteup_count: int = Field(default=0, description="赞同人数")
     comment_count: int = Field(default=0, description="评论数量")
     source_keyword: str = Field(default="", description="来源关键词")
