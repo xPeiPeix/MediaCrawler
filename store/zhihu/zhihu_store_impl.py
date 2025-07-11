@@ -284,6 +284,40 @@ class ZhihuCollectionJsonStoreImplement:
         """
         return f"{self.json_store_path}/{crawler_type_var.get()}_contents_{utils.get_current_date()}_{file_index:03d}.json"
 
+    def get_next_available_file_index(self) -> int:
+        """
+        获取下一个可用的文件索引，避免覆盖现有文件
+        Returns:
+            下一个可用的文件索引
+        """
+        import glob
+        import os
+
+        # 确保目录存在
+        pathlib.Path(self.json_store_path).mkdir(parents=True, exist_ok=True)
+
+        # 查找当前日期的所有文件
+        pattern = f"{self.json_store_path}/{crawler_type_var.get()}_contents_{utils.get_current_date()}_*.json"
+        existing_files = glob.glob(pattern)
+
+        if not existing_files:
+            return 1
+
+        # 提取现有文件的索引号
+        max_index = 0
+        for file_path in existing_files:
+            filename = os.path.basename(file_path)
+            # 文件名格式: collection_contents_2025-07-11_001.json
+            try:
+                # 提取最后一个下划线后、.json前的数字
+                index_str = filename.split('_')[-1].split('.')[0]
+                index = int(index_str)
+                max_index = max(max_index, index)
+            except (ValueError, IndexError):
+                continue
+
+        return max_index + 1
+
     async def store_content(self, content_item: Dict):
         """
         存储内容数据到缓存
@@ -326,10 +360,13 @@ class ZhihuCollectionJsonStoreImplement:
 
             utils.logger.info(f"[ZhihuCollectionJsonStore] Flushing {total_contents} contents to files")
 
+            # 获取起始文件索引，避免覆盖现有文件
+            start_file_index = self.get_next_available_file_index()
+
             # 按每个文件最多20条数据进行分片
             for i in range(0, total_contents, self.max_items_per_file):
                 chunk = contents[i:i + self.max_items_per_file]
-                file_index = (i // self.max_items_per_file) + 1
+                file_index = start_file_index + (i // self.max_items_per_file)
                 file_path = self.make_save_file_name(file_index)
 
                 # 确保目录存在

@@ -206,7 +206,7 @@ class ZhihuCrawler(AbstractCrawler):
                     callback=zhihu_store.batch_update_zhihu_note_comments
                 )
 
-    async def _get_hot_comments(self, content_item: ZhihuContent):
+    async def _get_hot_comments(self, content_item: ZhihuContent, is_collection_crawl: bool = False):
         """
         获取热门评论（第三阶段新增功能）
         Args:
@@ -236,8 +236,13 @@ class ZhihuCrawler(AbstractCrawler):
 
             if hot_comments:
                 utils.logger.info(f"[ZhihuCrawler._get_hot_comments] Found {len(hot_comments)} hot comments for {content_item.content_id}")
-                # 保存热门评论
-                await zhihu_store.batch_update_zhihu_note_comments(hot_comments)
+                # 将热门评论添加到content_item.comments列表中（用于收藏夹整合存储）
+                content_item.comments.extend(hot_comments)
+                # 只在非收藏夹爬取模式下使用分离存储（避免重复存储）
+                if not is_collection_crawl:
+                    await zhihu_store.batch_update_zhihu_note_comments(hot_comments)
+                else:
+                    utils.logger.info(f"[ZhihuCrawler._get_hot_comments] Collection crawl mode: skipping separate comment storage")
             else:
                 utils.logger.info(f"[ZhihuCrawler._get_hot_comments] No hot comments found for {content_item.content_id} (threshold: {config.MIN_COMMENT_LIKES})")
 
@@ -754,13 +759,17 @@ class ZhihuCrawler(AbstractCrawler):
             async with semaphore:
                 try:
                     if config.ENABLE_HOT_COMMENTS:
-                        await self._get_hot_comments(content_item)
+                        await self._get_hot_comments(content_item, is_collection_crawl=True)
                     else:
-                        await self.zhihu_client.get_note_all_comments(
+                        # 获取所有评论，不使用回调函数，直接返回评论数据
+                        comments_data = await self.zhihu_client.get_note_all_comments(
                             content=content_item,
                             crawl_interval=random.random(),
                             callback=None
                         )
+                        # 手动将评论数据添加到content_item.comments中
+                        if comments_data and isinstance(comments_data, list):
+                            content_item.comments.extend(comments_data)
 
                     # 将评论添加到收藏夹存储
                     if hasattr(collection_store, 'store_comment'):
