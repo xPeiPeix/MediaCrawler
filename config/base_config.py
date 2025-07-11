@@ -105,6 +105,14 @@ CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES = 10
 # 老版本项目使用了 db, 则需参考 schema/tables.sql line 287 增加表字段
 ENABLE_GET_SUB_COMMENTS = False
 
+# 热门评论相关配置（第三阶段新增）
+# 是否启用热门评论爬取模式
+ENABLE_HOT_COMMENTS = True
+# 热门评论数量限制
+HOT_COMMENTS_COUNT = 10
+# 热门评论最小点赞数阈值
+MIN_COMMENT_LIKES = 1
+
 # 已废弃⚠️⚠️⚠️指定小红书需要爬虫的笔记ID列表
 # 已废弃⚠️⚠️⚠️ 指定笔记ID笔记列表会因为缺少xsec_token和xsec_source参数导致爬取失败
 # XHS_SPECIFIED_ID_LIST = [

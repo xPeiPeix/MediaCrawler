@@ -22,7 +22,7 @@ from playwright.async_api import (BrowserContext, BrowserType, Page, Playwright,
 import config
 from constant import zhihu as constant
 from base.base_crawler import AbstractCrawler
-from model.m_zhihu import ZhihuContent, ZhihuCreator
+from model.m_zhihu import ZhihuContent, ZhihuCreator, ZhihuComment
 from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
 from store import zhihu as zhihu_store
 from tools import utils
@@ -50,6 +50,8 @@ class ZhihuCrawler(AbstractCrawler):
         self.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
         self._extractor = ZhihuExtractor()
         self.cdp_manager = None
+        # 问题详情缓存（第二阶段新增）
+        self.question_cache: Dict[str, Dict] = {}
 
     async def start(self) -> None:
         """
@@ -193,11 +195,93 @@ class ZhihuCrawler(AbstractCrawler):
         """
         async with semaphore:
             utils.logger.info(f"[ZhihuCrawler.get_comments] Begin get note id comments {content_item.content_id}")
-            await self.zhihu_client.get_note_all_comments(
+
+            # 检查是否启用热门评论模式（第三阶段新增功能）
+            if config.ENABLE_HOT_COMMENTS:
+                await self._get_hot_comments(content_item)
+            else:
+                await self.zhihu_client.get_note_all_comments(
+                    content=content_item,
+                    crawl_interval=random.random(),
+                    callback=zhihu_store.batch_update_zhihu_note_comments
+                )
+
+    async def _get_hot_comments(self, content_item: ZhihuContent):
+        """
+        获取热门评论（第三阶段新增功能）
+        Args:
+            content_item: 内容对象
+
+        Returns:
+
+        """
+        try:
+            utils.logger.info(f"[ZhihuCrawler._get_hot_comments] Getting hot comments for {content_item.content_id}")
+
+            # 获取所有评论（不使用回调函数，直接获取返回值）
+            all_comments = await self.zhihu_client.get_note_all_comments(
                 content=content_item,
                 crawl_interval=random.random(),
-                callback=zhihu_store.batch_update_zhihu_note_comments
+                callback=None  # 不使用回调，直接获取返回值
             )
+
+            if not all_comments:
+                utils.logger.info(f"[ZhihuCrawler._get_hot_comments] No comments found for {content_item.content_id}")
+                return
+
+            utils.logger.info(f"[ZhihuCrawler._get_hot_comments] Retrieved {len(all_comments)} total comments for {content_item.content_id}")
+
+            # 筛选热门评论
+            hot_comments = self._filter_hot_comments(all_comments)
+
+            if hot_comments:
+                utils.logger.info(f"[ZhihuCrawler._get_hot_comments] Found {len(hot_comments)} hot comments for {content_item.content_id}")
+                # 保存热门评论
+                await zhihu_store.batch_update_zhihu_note_comments(hot_comments)
+            else:
+                utils.logger.info(f"[ZhihuCrawler._get_hot_comments] No hot comments found for {content_item.content_id} (threshold: {config.MIN_COMMENT_LIKES})")
+
+        except Exception as e:
+            utils.logger.error(f"[ZhihuCrawler._get_hot_comments] Error getting hot comments for {content_item.content_id}: {e}")
+
+    def _filter_hot_comments(self, comments: List[ZhihuComment]) -> List[ZhihuComment]:
+        """
+        筛选热门评论
+        Args:
+            comments: 所有评论列表
+
+        Returns:
+            热门评论列表
+
+        """
+        try:
+            utils.logger.info(f"[ZhihuCrawler._filter_hot_comments] Starting to filter {len(comments)} comments with threshold {config.MIN_COMMENT_LIKES}")
+
+            # 过滤掉点赞数小于阈值的评论
+            filtered_comments = [
+                comment for comment in comments
+                if comment.like_count >= config.MIN_COMMENT_LIKES
+            ]
+
+            utils.logger.info(f"[ZhihuCrawler._filter_hot_comments] After threshold filtering: {len(filtered_comments)} comments remain")
+
+            # 按点赞数降序排序
+            filtered_comments.sort(key=lambda x: x.like_count, reverse=True)
+
+            # 取前N条热门评论
+            hot_comments = filtered_comments[:config.HOT_COMMENTS_COUNT]
+
+            # 输出热门评论的点赞数信息
+            if hot_comments:
+                like_counts = [comment.like_count for comment in hot_comments]
+                utils.logger.info(f"[ZhihuCrawler._filter_hot_comments] Hot comments like counts: {like_counts}")
+
+            utils.logger.info(f"[ZhihuCrawler._filter_hot_comments] Final result: {len(hot_comments)} hot comments from {len(comments)} total comments")
+            return hot_comments
+
+        except Exception as e:
+            utils.logger.error(f"[ZhihuCrawler._filter_hot_comments] Error filtering hot comments: {e}")
+            return []
 
     async def get_creators_and_notes(self) -> None:
         """
@@ -587,6 +671,18 @@ class ZhihuCrawler(AbstractCrawler):
                                 )
                                 utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Replaced {len(images_info)} image placeholders in content {content_id}")
 
+                        # 获取问题详情（第二阶段新增功能）
+                        if zhihu_content.content_type == "answer" and zhihu_content.question_id:
+                            question_info = await self._get_question_info_with_cache(zhihu_content.question_id)
+                            if question_info:
+                                zhihu_content.question_title = question_info.get("question_title", "")
+                                zhihu_content.question_detail = question_info.get("question_detail", "")
+                                zhihu_content.question_tags = question_info.get("question_tags", [])
+                                zhihu_content.question_follower_count = question_info.get("question_follower_count", 0)
+                                zhihu_content.question_answer_count = question_info.get("question_answer_count", 0)
+                                zhihu_content.question_view_count = question_info.get("question_view_count", 0)
+                                utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Added question info for answer {content_id}")
+
                         all_contents.append(zhihu_content)
                         # 保存内容（包含图片信息）
                         await zhihu_store.update_zhihu_content(zhihu_content, images_info)
@@ -702,6 +798,41 @@ class ZhihuCrawler(AbstractCrawler):
             except Exception as e:
                 utils.logger.error(f"[ZhihuCrawler._get_full_content_detail] Error getting full content for {content_url}: {e}")
                 return None
+
+    async def _get_question_info_with_cache(self, question_id: str) -> Optional[Dict]:
+        """
+        获取问题详情信息（带缓存）
+        Args:
+            question_id: 问题ID
+
+        Returns:
+            问题详情字典
+        """
+        if not question_id:
+            return None
+
+        # 检查缓存
+        if question_id in self.question_cache:
+            utils.logger.info(f"[ZhihuCrawler._get_question_info_with_cache] Using cached question info for {question_id}")
+            return self.question_cache[question_id]
+
+        try:
+            # 获取问题详情
+            utils.logger.info(f"[ZhihuCrawler._get_question_info_with_cache] Fetching question info for {question_id}")
+            question_info = await self.zhihu_client.get_question_info(question_id)
+
+            if question_info:
+                # 缓存结果
+                self.question_cache[question_id] = question_info
+                utils.logger.info(f"[ZhihuCrawler._get_question_info_with_cache] Cached question info for {question_id}")
+                return question_info
+            else:
+                utils.logger.warning(f"[ZhihuCrawler._get_question_info_with_cache] No question info found for {question_id}")
+                return None
+
+        except Exception as e:
+            utils.logger.error(f"[ZhihuCrawler._get_question_info_with_cache] Error getting question info for {question_id}: {e}")
+            return None
 
     def _extract_answer_from_collection_item(self, content: Dict) -> Optional[ZhihuContent]:
         """

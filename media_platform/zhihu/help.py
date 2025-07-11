@@ -462,6 +462,50 @@ class ZhihuExtractor:
 
         return self._extract_zvideo_content(video_detail_info)
 
+    def extract_question_info_from_html(self, html_content: str) -> Optional[Dict]:
+        """
+        从HTML中提取问题详情信息
+        Args:
+            html_content: 问题页面的HTML内容
+
+        Returns:
+            包含问题详情的字典，如果解析失败返回None
+
+        """
+        try:
+            js_init_data: str = Selector(text=html_content).xpath("//script[@id='js-initialData']/text()").get(default="")
+            if not js_init_data:
+                return None
+
+            json_data: Dict = json.loads(js_init_data)
+            questions_info: Dict = json_data.get("initialState", {}).get("entities", {}).get("questions", {})
+            if not questions_info:
+                return None
+
+            # 获取第一个问题的信息（通常页面只有一个问题）
+            question_id = list(questions_info.keys())[0] if questions_info else None
+            if not question_id:
+                return None
+
+            question_data = questions_info[question_id]
+
+            # 提取问题详情
+            question_info = {
+                "question_id": question_id,
+                "question_title": extract_text_from_html(question_data.get("title", "")),
+                "question_detail": extract_text_from_html(question_data.get("detail", "")),
+                "question_tags": [tag.get("name", "") for tag in question_data.get("topics", [])],
+                "question_follower_count": question_data.get("follower_count", 0),
+                "question_answer_count": question_data.get("answer_count", 0),
+                "question_view_count": question_data.get("visit_count", 0)
+            }
+
+            return question_info
+
+        except Exception as e:
+            utils.logger.error(f"[ZhihuExtractor.extract_question_info_from_html] Error extracting question info: {e}")
+            return None
+
 
 def judge_zhihu_url(note_detail_url: str) -> str:
     """

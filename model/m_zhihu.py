@@ -10,7 +10,7 @@
 
 
 # -*- coding: utf-8 -*-
-from typing import Optional, Union
+from typing import Optional, Union, List
 
 from pydantic import BaseModel, Field
 
@@ -27,6 +27,14 @@ class ZhihuContent(BaseModel):
     has_images: bool = Field(default=False, description="是否包含图片")
     images_processed: bool = Field(default=False, description="图片是否已处理")
     question_id: str = Field(default="", description="问题ID, type为answer时有值")
+    # 问题详情相关字段（第二阶段新增）
+    question_title: str = Field(default="", description="问题标题")
+    question_detail: str = Field(default="", description="问题详细描述")
+    question_tags: List[str] = Field(default_factory=list, description="问题标签列表")
+    question_follower_count: int = Field(default=0, description="问题关注数")
+    question_answer_count: int = Field(default=0, description="回答总数")
+    question_view_count: int = Field(default=0, description="问题浏览数")
+
     title: str = Field(default="", description="内容标题")
     desc: str = Field(default="", description="内容描述")
     created_time: Union[int, str] = Field(default=0, description="创建时间")

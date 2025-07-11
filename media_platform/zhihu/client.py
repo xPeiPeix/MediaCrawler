@@ -584,3 +584,17 @@ class ZhiHuClient(AbstractApiClient):
         uri = f"/zvideo/{video_id}"
         response_html = await self.get(uri, return_response=True)
         return self._extractor.extract_zvideo_content_from_html(response_html)
+
+    async def get_question_info(self, question_id: str) -> Optional[Dict]:
+        """
+        获取问题详情信息
+        Args:
+            question_id: 问题ID
+
+        Returns:
+            问题详情字典，包含标题、描述、标签、统计信息等
+
+        """
+        uri = f"/question/{question_id}"
+        response_html = await self.get(uri, return_response=True)
+        return self._extractor.extract_question_info_from_html(response_html)
