@@ -500,6 +500,41 @@ class ZhihuExtractor:
                 "question_view_count": question_data.get("visit_count", 0)
             }
 
+            # 调试：记录原始数据中的所有字段
+            utils.logger.info(f"[ZhihuExtractor.extract_question_info_from_html] Question data keys: {list(question_data.keys())}")
+
+            # 尝试其他可能的字段名
+            alternative_fields = {
+                "followerCount": question_data.get("followerCount", 0),
+                "answerCount": question_data.get("answerCount", 0),
+                "visitCount": question_data.get("visitCount", 0),
+                "followingCount": question_data.get("followingCount", 0),
+                "viewCount": question_data.get("viewCount", 0),
+                "totalAnswerCount": question_data.get("totalAnswerCount", 0)
+            }
+
+            # 如果原字段为0，尝试使用替代字段
+            if question_info["question_follower_count"] == 0:
+                for alt_key, alt_value in alternative_fields.items():
+                    if alt_value > 0 and "follow" in alt_key.lower():
+                        question_info["question_follower_count"] = alt_value
+                        utils.logger.info(f"[ZhihuExtractor.extract_question_info_from_html] Used alternative field {alt_key}: {alt_value}")
+                        break
+
+            if question_info["question_answer_count"] == 0:
+                for alt_key, alt_value in alternative_fields.items():
+                    if alt_value > 0 and "answer" in alt_key.lower():
+                        question_info["question_answer_count"] = alt_value
+                        utils.logger.info(f"[ZhihuExtractor.extract_question_info_from_html] Used alternative field {alt_key}: {alt_value}")
+                        break
+
+            if question_info["question_view_count"] == 0:
+                for alt_key, alt_value in alternative_fields.items():
+                    if alt_value > 0 and ("visit" in alt_key.lower() or "view" in alt_key.lower()):
+                        question_info["question_view_count"] = alt_value
+                        utils.logger.info(f"[ZhihuExtractor.extract_question_info_from_html] Used alternative field {alt_key}: {alt_value}")
+                        break
+
             return question_info
 
         except Exception as e:

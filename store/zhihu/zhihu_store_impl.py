@@ -327,6 +327,10 @@ class ZhihuCollectionJsonStoreImplement:
         async with self.lock:
             content_id = content_item.get("content_id")
             if content_id:
+                # 设置source_keyword（与其他存储方式保持一致）
+                from store.zhihu import source_keyword_var
+                content_item["source_keyword"] = source_keyword_var.get()
+
                 # 初始化评论列表
                 content_item["comments"] = []
                 self._content_cache[content_id] = content_item

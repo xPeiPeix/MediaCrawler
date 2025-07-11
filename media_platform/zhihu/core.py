@@ -563,6 +563,10 @@ class ZhihuCrawler(AbstractCrawler):
         """
         utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Begin get collection contents for: {collection_title}")
 
+        # 设置source_keyword为收藏夹标题（与搜索爬取保持一致）
+        source_keyword_var.set(collection_title or f"collection_{collection_id}")
+        utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Set source_keyword: {source_keyword_var.get()}")
+
         # 检查数量限制配置
         max_items = config.CRAWLER_MAX_COLLECTION_ITEMS_COUNT
         if max_items > 0:
@@ -927,7 +931,8 @@ class ZhihuCrawler(AbstractCrawler):
             question = content.get("question", {})
             author = content.get("author", {})
 
-            return ZhihuContent(
+            # 创建ZhihuContent对象，修复字段映射问题
+            zhihu_content = ZhihuContent(
                 content_id=str(content.get("id", "")),
                 content_type="answer",
                 content_url=content.get("url", ""),
@@ -936,11 +941,18 @@ class ZhihuCrawler(AbstractCrawler):
                 note_id=str(content.get("id", "")),
                 created_time=content.get("created_time", 0),
                 updated_time=content.get("updated_time", 0),
-                liked_count=content.get("voteup_count", 0),
-                comments_count=content.get("comment_count", 0),
+                # 修复字段映射：使用正确的字段名
+                voteup_count=content.get("voteup_count", 0),
+                comment_count=content.get("comment_count", 0),
                 shared_count=0,
                 topics=question.get("topics", []),
                 content_url_token=content.get("url", "").split("/")[-1] if content.get("url") else "",
+                # 修复用户信息映射：直接设置到顶级字段
+                user_id=str(author.get("id", "")),
+                user_nickname=author.get("name", ""),
+                user_avatar=author.get("avatar_url", ""),
+                user_url_token=author.get("url_token", ""),
+                user_link=f"https://www.zhihu.com/people/{author.get('url_token', '')}" if author.get("url_token") else "",
                 author=ZhihuCreator(
                     user_id=str(author.get("id", "")),
                     user_nickname=author.get("name", ""),
@@ -953,6 +965,7 @@ class ZhihuCrawler(AbstractCrawler):
                     thanked_count=author.get("thanked_count", 0)
                 )
             )
+            return zhihu_content
         except Exception as e:
             utils.logger.error(f"[ZhihuCrawler._extract_answer_from_collection_item] Error extracting answer: {e}")
             return None
@@ -969,7 +982,8 @@ class ZhihuCrawler(AbstractCrawler):
         try:
             author = content.get("author", {})
 
-            return ZhihuContent(
+            # 创建ZhihuContent对象，修复字段映射问题
+            zhihu_content = ZhihuContent(
                 content_id=str(content.get("id", "")),
                 content_type="article",
                 content_url=content.get("url", ""),
@@ -978,11 +992,18 @@ class ZhihuCrawler(AbstractCrawler):
                 note_id=str(content.get("id", "")),
                 created_time=content.get("created", 0),
                 updated_time=content.get("updated", 0),
-                liked_count=content.get("voteup_count", 0),
-                comments_count=content.get("comment_count", 0),
+                # 修复字段映射：使用正确的字段名
+                voteup_count=content.get("voteup_count", 0),
+                comment_count=content.get("comment_count", 0),
                 shared_count=0,
                 topics=[],
                 content_url_token=content.get("url", "").split("/")[-1] if content.get("url") else "",
+                # 修复用户信息映射：直接设置到顶级字段
+                user_id=str(author.get("id", "")),
+                user_nickname=author.get("name", ""),
+                user_avatar=author.get("avatar_url", ""),
+                user_url_token=author.get("url_token", ""),
+                user_link=f"https://www.zhihu.com/people/{author.get('url_token', '')}" if author.get("url_token") else "",
                 author=ZhihuCreator(
                     user_id=str(author.get("id", "")),
                     user_nickname=author.get("name", ""),
@@ -995,6 +1016,7 @@ class ZhihuCrawler(AbstractCrawler):
                     thanked_count=author.get("thanked_count", 0)
                 )
             )
+            return zhihu_content
         except Exception as e:
             utils.logger.error(f"[ZhihuCrawler._extract_article_from_collection_item] Error extracting article: {e}")
             return None
