@@ -569,6 +569,10 @@ class ZhihuCrawler(AbstractCrawler):
         limit = 20
         all_contents = []
 
+        # 创建收藏夹专用存储实例
+        from store.zhihu import ZhihuStoreFactory
+        collection_store = ZhihuStoreFactory.create_collection_store()
+
         # 创建信号量控制并发
         detail_semaphore = asyncio.Semaphore(3)  # 限制同时获取详情的数量
 
@@ -696,8 +700,12 @@ class ZhihuCrawler(AbstractCrawler):
                                 utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Added question info for answer {content_id}")
 
                         all_contents.append(zhihu_content)
-                        # 保存内容（包含图片信息）
-                        await zhihu_store.update_zhihu_content(zhihu_content, images_info)
+                        # 保存内容到收藏夹专用存储
+                        if hasattr(collection_store, 'store_content'):
+                            await collection_store.store_content(zhihu_content.model_dump())
+                        else:
+                            # 兼容其他存储方式
+                            await zhihu_store.update_zhihu_content(zhihu_content, images_info)
 
                         # 增量模式：更新已处理内容ID缓存
                         if config.CRAWL_MODE == "incremental":
@@ -725,7 +733,53 @@ class ZhihuCrawler(AbstractCrawler):
 
         # 批量获取评论
         if config.ENABLE_GET_COMMENTS and all_contents:
-            await self.batch_get_content_comments(all_contents)
+            await self._batch_get_collection_comments(all_contents, collection_store)
+
+        # 将缓存的数据写入文件
+        if hasattr(collection_store, 'flush_to_files'):
+            await collection_store.flush_to_files()
+
+    async def _batch_get_collection_comments(self, content_list: List[ZhihuContent], collection_store):
+        """
+        批量获取收藏夹内容的评论（专用于收藏夹存储）
+        Args:
+            content_list: 内容列表
+            collection_store: 收藏夹存储实例
+        """
+        utils.logger.info(f"[ZhihuCrawler._batch_get_collection_comments] Begin batch get comments for {len(content_list)} contents")
+
+        semaphore = asyncio.Semaphore(1)  # 控制并发数
+
+        async def get_content_comments(content_item: ZhihuContent):
+            async with semaphore:
+                try:
+                    if config.ENABLE_HOT_COMMENTS:
+                        await self._get_hot_comments(content_item)
+                    else:
+                        await self.zhihu_client.get_note_all_comments(
+                            content=content_item,
+                            crawl_interval=random.random(),
+                            callback=None
+                        )
+
+                    # 将评论添加到收藏夹存储
+                    if hasattr(collection_store, 'store_comment'):
+                        for comment in content_item.comments:
+                            comment_data = comment.model_dump()
+                            comment_data["content_id"] = content_item.content_id
+                            comment_data["content_type"] = content_item.content_type
+                            await collection_store.store_comment(comment_data)
+
+                    utils.logger.info(f"[ZhihuCrawler._batch_get_collection_comments] Got {len(content_item.comments)} comments for content: {content_item.content_id}")
+
+                except Exception as e:
+                    utils.logger.error(f"[ZhihuCrawler._batch_get_collection_comments] Error getting comments for {content_item.content_id}: {e}")
+
+        # 并发获取评论
+        tasks = [get_content_comments(content) for content in content_list]
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        utils.logger.info(f"[ZhihuCrawler._batch_get_collection_comments] Finished batch get comments")
 
     def _format_gender_text(self, gender: int) -> str:
         """

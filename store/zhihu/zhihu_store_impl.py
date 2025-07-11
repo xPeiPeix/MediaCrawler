@@ -177,6 +177,9 @@ class ZhihuJsonStoreImplement(AbstractStore):
     file_count: int = calculate_number_of_files(json_store_path)
     WordCloud = words.AsyncWordCloudGenerator()
 
+
+
+
     def make_save_file_name(self, store_type: str) -> (str, str):
         """
         make save file name by store type
@@ -254,3 +257,98 @@ class ZhihuJsonStoreImplement(AbstractStore):
 
         """
         await self.save_data_to_json(creator, "creator")
+
+
+class ZhihuCollectionJsonStoreImplement:
+    """
+    知乎收藏夹专用JSON存储实现
+    特点：内容和评论整合存储，每个文件最多20条数据
+    """
+    def __init__(self):
+        self.json_store_path: str = "data/zhihu/json"
+        self.lock = asyncio.Lock()
+        self.max_items_per_file: int = 20
+
+        # 内存中的数据缓存
+        self._content_cache: Dict[str, Dict] = {}
+        self._current_file_index: int = 1
+        self._current_file_count: int = 0
+
+    def make_save_file_name(self, file_index: int) -> str:
+        """
+        生成分片文件名
+        Args:
+            file_index: 文件索引
+        Returns:
+            文件路径
+        """
+        return f"{self.json_store_path}/{crawler_type_var.get()}_contents_{utils.get_current_date()}_{file_index:03d}.json"
+
+    async def store_content(self, content_item: Dict):
+        """
+        存储内容数据到缓存
+        Args:
+            content_item: 内容数据
+        """
+        async with self.lock:
+            content_id = content_item.get("content_id")
+            if content_id:
+                # 初始化评论列表
+                content_item["comments"] = []
+                self._content_cache[content_id] = content_item
+                utils.logger.info(f"[ZhihuCollectionJsonStore] Cached content: {content_id}")
+
+    async def store_comment(self, comment_item: Dict):
+        """
+        将评论添加到对应内容的评论列表中
+        Args:
+            comment_item: 评论数据
+        """
+        async with self.lock:
+            content_id = comment_item.get("content_id")
+            if content_id and content_id in self._content_cache:
+                # 移除不需要的字段
+                comment_data = {k: v for k, v in comment_item.items()
+                              if k not in ["content_id", "content_type"]}
+                self._content_cache[content_id]["comments"].append(comment_data)
+                utils.logger.info(f"[ZhihuCollectionJsonStore] Added comment to content: {content_id}")
+
+    async def flush_to_files(self):
+        """
+        将缓存的数据写入文件
+        """
+        async with self.lock:
+            if not self._content_cache:
+                return
+
+            contents = list(self._content_cache.values())
+            total_contents = len(contents)
+
+            utils.logger.info(f"[ZhihuCollectionJsonStore] Flushing {total_contents} contents to files")
+
+            # 按每个文件最多20条数据进行分片
+            for i in range(0, total_contents, self.max_items_per_file):
+                chunk = contents[i:i + self.max_items_per_file]
+                file_index = (i // self.max_items_per_file) + 1
+                file_path = self.make_save_file_name(file_index)
+
+                # 确保目录存在
+                pathlib.Path(self.json_store_path).mkdir(parents=True, exist_ok=True)
+
+                try:
+                    async with aiofiles.open(file_path, 'w', encoding='utf-8') as file:
+                        await file.write(json.dumps(chunk, ensure_ascii=False, indent=4))
+
+                    utils.logger.info(f"[ZhihuCollectionJsonStore] Saved {len(chunk)} contents to {file_path}")
+                except Exception as e:
+                    utils.logger.error(f"[ZhihuCollectionJsonStore] Error saving to {file_path}: {e}")
+
+            # 清空缓存
+            self._content_cache.clear()
+            utils.logger.info(f"[ZhihuCollectionJsonStore] Flush completed, cache cleared")
+
+    async def store_creator(self, creator: Dict):
+        """
+        存储创作者信息（收藏夹模式下不需要）
+        """
+        pass

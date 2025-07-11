@@ -49,6 +49,9 @@ class ZhihuContent(BaseModel):
     user_avatar: str = Field(default="", description="用户头像地址")
     user_url_token: str = Field(default="", description="用户url_token")
 
+    # 评论数据（收藏夹爬取时使用）
+    comments: List['ZhihuComment'] = Field(default_factory=list, description="评论列表")
+
 
 class ZhihuComment(BaseModel):
     """

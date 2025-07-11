@@ -17,7 +17,8 @@ from base.base_crawler import AbstractStore
 from model.m_zhihu import ZhihuComment, ZhihuContent, ZhihuCreator
 from store.zhihu.zhihu_store_impl import (ZhihuCsvStoreImplement,
                                           ZhihuDbStoreImplement,
-                                          ZhihuJsonStoreImplement)
+                                          ZhihuJsonStoreImplement,
+                                         ZhihuCollectionJsonStoreImplement)
 from store.zhihu.zhihu_store_image import ZhihuStoreImage
 from tools import utils
 from var import source_keyword_var
@@ -36,6 +37,19 @@ class ZhihuStoreFactory:
         if not store_class:
             raise ValueError("[ZhihuStoreFactory.create_store] Invalid save option only supported csv or db or json ...")
         return store_class()
+
+    @staticmethod
+    def create_collection_store() -> AbstractStore:
+        """
+        创建收藏夹专用存储实例
+        Returns:
+            收藏夹存储实例
+        """
+        if config.SAVE_DATA_OPTION == "json":
+            return ZhihuCollectionJsonStoreImplement()
+        else:
+            # 其他存储方式仍使用原有实现
+            return ZhihuStoreFactory.create_store()
 
 async def batch_update_zhihu_contents(contents: List[ZhihuContent]):
     """
