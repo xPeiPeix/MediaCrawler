@@ -558,6 +558,13 @@ class ZhihuCrawler(AbstractCrawler):
         """
         utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Begin get collection contents for: {collection_title}")
 
+        # 检查数量限制配置
+        max_items = config.CRAWLER_MAX_COLLECTION_ITEMS_COUNT
+        if max_items > 0:
+            utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Max items limit set to: {max_items}")
+        else:
+            utils.logger.info(f"[ZhihuCrawler.get_collection_contents] No limit set, will crawl all items")
+
         page = 0
         limit = 20
         all_contents = []
@@ -585,6 +592,11 @@ class ZhihuCrawler(AbstractCrawler):
 
                 # 处理每个收藏项
                 for item in items:
+                    # 检查是否达到数量限制
+                    if max_items > 0 and len(all_contents) >= max_items:
+                        utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Reached max items limit ({max_items}), stopping")
+                        break
+
                     content = item.get("content")
                     if not content:
                         continue
@@ -694,6 +706,11 @@ class ZhihuCrawler(AbstractCrawler):
 
                         # 添加延迟避免请求过快
                         await asyncio.sleep(0.5)
+
+                # 检查是否达到数量限制，如果达到则退出外层循环
+                if max_items > 0 and len(all_contents) >= max_items:
+                    utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Reached max items limit ({max_items}), stopping collection processing")
+                    break
 
                 page += 1
 

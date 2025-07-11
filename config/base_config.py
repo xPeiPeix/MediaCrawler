@@ -89,6 +89,9 @@ START_PAGE = 1
 # 爬取视频/帖子的数量控制
 CRAWLER_MAX_NOTES_COUNT = 200
 
+# 收藏夹内容数量控制（单个收藏夹最大爬取条数，0表示不限制）
+CRAWLER_MAX_COLLECTION_ITEMS_COUNT = 0
+
 # 并发爬虫数量控制
 MAX_CONCURRENCY_NUM = 1
 

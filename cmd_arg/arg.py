@@ -39,6 +39,8 @@ async def parse_cmd():
     parser.add_argument('--mode', type=str,
                         help='crawl mode (full | incremental), full: crawl all content, incremental: skip existing content',
                         choices=['full', 'incremental'], default='full')
+    parser.add_argument('--max_count', type=int,
+                        help='max count of items to crawl per collection (0 means no limit). Example: --max_count 3 will crawl only first 3 items from each collection', default=config.CRAWLER_MAX_COLLECTION_ITEMS_COUNT)
 
     args = parser.parse_args()
 
@@ -53,3 +55,4 @@ async def parse_cmd():
     config.SAVE_DATA_OPTION = args.save_data_option
     config.COOKIES = args.cookies
     config.CRAWL_MODE = args.mode
+    config.CRAWLER_MAX_COLLECTION_ITEMS_COUNT = args.max_count
