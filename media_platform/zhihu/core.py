@@ -619,8 +619,18 @@ class ZhihuCrawler(AbstractCrawler):
                     # 提取内容信息
                     content_type = content.get("type", "unknown")
                     content_id = content.get("id")
-                    content_title = content.get("title", "无标题")
                     content_url = content.get("url", "")
+
+                    # 根据内容类型获取正确的标题
+                    if content_type == "answer":
+                        # 回答类型：使用问题标题
+                        question = content.get("question", {})
+                        content_title = question.get("title", "无标题")
+                    elif content_type == "article":
+                        # 文章类型：使用文章标题
+                        content_title = content.get("title", "无标题")
+                    else:
+                        content_title = content.get("title", "无标题")
 
                     utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Processing {content_type}: {content_title}")
 
