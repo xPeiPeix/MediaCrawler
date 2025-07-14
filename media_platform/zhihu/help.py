@@ -106,7 +106,6 @@ class ZhihuExtractor:
 
         res.question_id = answer.get("question").get("id")
         res.content_url = f"{zhihu_constant.ZHIHU_URL}/question/{res.question_id}/answer/{res.content_id}"
-        res.title = extract_text_from_html(answer.get("title", ""))
         res.desc = extract_text_from_html(answer.get("description", "") or answer.get("excerpt", ""))
         res.created_time = answer.get("created_time")
         res.updated_time = answer.get("updated_time")
@@ -140,7 +139,6 @@ class ZhihuExtractor:
         res.content_text = extract_text_from_html(original_content)
 
         res.content_url = f"{zhihu_constant.ZHIHU_ZHUANLAN_URL}/p/{res.content_id}"
-        res.title = extract_text_from_html(article.get("title"))
         res.desc = extract_text_from_html(article.get("excerpt"))
         res.created_time = article.get("created_time", 0) or article.get("created", 0)
         res.updated_time = article.get("updated_time", 0) or article.get("updated", 0)
@@ -176,7 +174,6 @@ class ZhihuExtractor:
             res.created_time = zvideo.get("created_at")
         res.content_id = zvideo.get("id")
         res.content_type = zvideo.get("type")
-        res.title = extract_text_from_html(zvideo.get("title"))
         res.desc = extract_text_from_html(zvideo.get("description"))
         res.voteup_count = zvideo.get("voteup_count")
         res.comment_count = zvideo.get("comment_count")
@@ -184,7 +181,6 @@ class ZhihuExtractor:
         # extract author info
         author_info = self._extract_content_or_comment_author(zvideo.get("author"))
         res.user_id = author_info.user_id
-        res.user_link = author_info.user_link
         res.user_nickname = author_info.user_nickname
         res.user_avatar = author_info.user_avatar
         res.user_url_token = author_info.url_token
@@ -207,7 +203,6 @@ class ZhihuExtractor:
             if not author.get("id"):
                 author = author.get("member")
             res.user_id = author.get("id")
-            res.user_link = f"{zhihu_constant.ZHIHU_URL}/people/{author.get('url_token')}"
             res.user_nickname = author.get("name")
             res.user_avatar = author.get("avatar_url")
             res.url_token = author.get("url_token")
@@ -363,7 +358,6 @@ class ZhihuExtractor:
 
         res = ZhihuCreator()
         res.user_id = creator_info.get("id")
-        res.user_link = f"{zhihu_constant.ZHIHU_URL}/people/{user_url_token}"
         res.user_nickname = creator_info.get("name")
         res.user_avatar = creator_info.get("avatarUrl")
         res.url_token = creator_info.get("urlToken") or user_url_token

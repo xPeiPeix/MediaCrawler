@@ -35,7 +35,6 @@ class ZhihuContent(BaseModel):
     question_answer_count: int = Field(default=0, description="回答总数")
     question_view_count: int = Field(default=0, description="问题浏览数")
 
-    title: str = Field(default="", description="内容标题")
     desc: str = Field(default="", description="内容描述")
     created_time: Union[int, str] = Field(default=0, description="创建时间")
     updated_time: Union[int, str] = Field(default=0, description="更新时间")
@@ -44,7 +43,6 @@ class ZhihuContent(BaseModel):
     source_keyword: str = Field(default="", description="来源关键词")
 
     user_id: str = Field(default="", description="用户ID")
-    user_link: str = Field(default="", description="用户主页链接")
     user_nickname: str = Field(default="", description="用户昵称")
     user_avatar: str = Field(default="", description="用户头像地址")
     user_url_token: str = Field(default="", description="用户url_token")
@@ -70,7 +68,6 @@ class ZhihuComment(BaseModel):
     content_type: str = Field(default="", description="内容类型(article | answer | zvideo)")
 
     user_id: str = Field(default="", description="用户ID")
-    user_link: str = Field(default="", description="用户主页链接")
     user_nickname: str = Field(default="", description="用户昵称")
     user_avatar: str = Field(default="", description="用户头像地址")
 
@@ -80,7 +77,6 @@ class ZhihuCreator(BaseModel):
     知乎创作者
     """
     user_id: str = Field(default="", description="用户ID")
-    user_link: str = Field(default="", description="用户主页链接")
     user_nickname: str = Field(default="", description="用户昵称")
     user_avatar: str = Field(default="", description="用户头像地址")
     url_token: str = Field(default="", description="用户url_token")

@@ -956,9 +956,6 @@ class ZhihuCrawler(AbstractCrawler):
             user_nickname = author.get("name", "")
             user_avatar = author.get("avatar_url", "")
             user_url_token = author.get("url_token", "")
-            # 构造用户链接
-            from constant import zhihu as zhihu_constant
-            user_link = f"{zhihu_constant.ZHIHU_URL}/people/{user_url_token}" if user_url_token else ""
 
             # 转换时间戳为可读格式
             def convert_timestamp_to_readable(timestamp):
@@ -980,7 +977,6 @@ class ZhihuCrawler(AbstractCrawler):
                 content_id=str(content.get("id", "")),
                 content_type="answer",
                 content_url=content.get("url", ""),
-                title=question.get("title", ""),
                 desc=content.get("excerpt", ""),
                 note_id=str(content.get("id", "")),
                 created_time=created_time_readable,
@@ -992,7 +988,6 @@ class ZhihuCrawler(AbstractCrawler):
                 content_url_token=content.get("url", "").split("/")[-1] if content.get("url") else "",
                 # 添加用户信息到顶级字段
                 user_id=user_id,
-                user_link=user_link,
                 user_nickname=user_nickname,
                 user_avatar=user_avatar,
                 user_url_token=user_url_token,
@@ -1029,9 +1024,6 @@ class ZhihuCrawler(AbstractCrawler):
             user_nickname = author.get("name", "")
             user_avatar = author.get("avatar_url", "")
             user_url_token = author.get("url_token", "")
-            # 构造用户链接
-            from constant import zhihu as zhihu_constant
-            user_link = f"{zhihu_constant.ZHIHU_URL}/people/{user_url_token}" if user_url_token else ""
 
             # 转换时间戳为可读格式
             def convert_timestamp_to_readable(timestamp):
@@ -1053,7 +1045,6 @@ class ZhihuCrawler(AbstractCrawler):
                 content_id=str(content.get("id", "")),
                 content_type="article",
                 content_url=content.get("url", ""),
-                title=content.get("title", ""),
                 desc=content.get("excerpt", ""),
                 note_id=str(content.get("id", "")),
                 created_time=created_time_readable,
@@ -1065,7 +1056,6 @@ class ZhihuCrawler(AbstractCrawler):
                 content_url_token=content.get("url", "").split("/")[-1] if content.get("url") else "",
                 # 添加用户信息到顶级字段
                 user_id=user_id,
-                user_link=user_link,
                 user_nickname=user_nickname,
                 user_avatar=user_avatar,
                 user_url_token=user_url_token,
@@ -1212,7 +1202,7 @@ class ZhihuCrawler(AbstractCrawler):
                 'content_id': zhihu_content.content_id,
                 'content_text': zhihu_content.content_text,
                 'content_url': zhihu_content.content_url,
-                'title': zhihu_content.title
+                'question_title': zhihu_content.question_title
             }
 
             # 使用图片处理器处理图片
