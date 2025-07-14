@@ -61,7 +61,7 @@ class ZhihuComment(BaseModel):
     comment_id: str = Field(default="", description="评论ID")
     parent_comment_id: str = Field(default="", description="父评论ID")
     content: str = Field(default="", description="评论内容")
-    publish_time: int = Field(default=0, description="发布时间")
+    publish_time: Union[int, str] = Field(default=0, description="发布时间")
     ip_location: Optional[str] = Field(default="", description="IP地理位置")
     sub_comment_count: int = Field(default=0, description="子评论数")
     like_count: int = Field(default=0, description="点赞数")

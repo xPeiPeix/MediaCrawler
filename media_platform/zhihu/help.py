@@ -251,7 +251,18 @@ class ZhihuExtractor:
         res.comment_id = str(comment.get("id", ""))
         res.parent_comment_id = comment.get("reply_comment_id")
         res.content = extract_text_from_html(comment.get("content"))
-        res.publish_time = comment.get("created_time")
+
+        # 转换时间戳为可读格式
+        publish_time_raw = comment.get("created_time", 0)
+        if publish_time_raw == 0:
+            res.publish_time = "0"
+        else:
+            try:
+                from tools.time_util import get_time_str_from_unix_time
+                res.publish_time = get_time_str_from_unix_time(publish_time_raw)
+            except Exception:
+                res.publish_time = str(publish_time_raw)
+
         res.ip_location = self._extract_comment_ip_location(comment.get("comment_tag", []))
         res.sub_comment_count = comment.get("child_comment_count")
         res.like_count = comment.get("like_count") if comment.get("like_count") else 0
@@ -489,16 +500,26 @@ class ZhihuExtractor:
 
             question_data = questions_info[question_id]
 
+            # 智能提取问题统计字段，支持新旧字段名自动适配
+            def get_field_with_fallback(data, new_field, old_field, default=0):
+                """优先使用新字段名，如果不存在则使用旧字段名"""
+                value = data.get(new_field, data.get(old_field, default))
+                if value != default:
+                    utils.logger.debug(f"[ZhihuExtractor.extract_question_info_from_html] Using field '{new_field if new_field in data else old_field}' with value {value}")
+                return value
+
             # 提取问题详情
             question_info = {
                 "question_id": question_id,
                 "question_title": extract_text_from_html(question_data.get("title", "")),
                 "question_detail": extract_text_from_html(question_data.get("detail", "")),
                 "question_tags": [tag.get("name", "") for tag in question_data.get("topics", [])],
-                "question_follower_count": question_data.get("follower_count", 0),
-                "question_answer_count": question_data.get("answer_count", 0),
-                "question_view_count": question_data.get("visit_count", 0)
+                "question_follower_count": get_field_with_fallback(question_data, "followerCount", "follower_count", 0),
+                "question_answer_count": get_field_with_fallback(question_data, "answerCount", "answer_count", 0),
+                "question_view_count": get_field_with_fallback(question_data, "visitCount", "visit_count", 0)
             }
+
+            utils.logger.debug(f"[ZhihuExtractor.extract_question_info_from_html] Extracted question info for {question_id}: follower={question_info['question_follower_count']}, answer={question_info['question_answer_count']}, view={question_info['question_view_count']}")
 
             return question_info
 

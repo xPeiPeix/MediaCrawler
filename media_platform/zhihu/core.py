@@ -543,7 +543,7 @@ class ZhihuCrawler(AbstractCrawler):
                 utils.logger.info(f"[ZhihuCrawler.get_user_collections] Collection {collection_title} is empty, skipping")
                 continue
 
-            # 获取收藏夹内容
+            # 获取收藏夹内容（每个收藏夹独立存储）
             await self.get_collection_contents(collection_id, collection_title)
 
         # 显示最终统计信息
@@ -574,9 +574,15 @@ class ZhihuCrawler(AbstractCrawler):
         limit = 20
         all_contents = []
 
-        # 创建收藏夹专用存储实例
+        # 为每个收藏夹创建独立的存储实例（支持实时分片）
         from store.zhihu import ZhihuStoreFactory
         collection_store = ZhihuStoreFactory.create_collection_store()
+
+        # 设置收藏夹标题用于文件命名
+        if hasattr(collection_store, 'set_collection_title'):
+            collection_store.set_collection_title(collection_title)
+
+        utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Created independent collection store for: {collection_title}")
 
         # 创建信号量控制并发
         detail_semaphore = asyncio.Semaphore(3)  # 限制同时获取详情的数量
@@ -637,6 +643,10 @@ class ZhihuCrawler(AbstractCrawler):
                         continue
 
                     if zhihu_content:
+                        # 设置来源关键词为收藏夹标题
+                        zhihu_content.source_keyword = collection_title
+                        utils.logger.debug(f"[ZhihuCrawler.get_collection_contents] Set source_keyword to '{collection_title}' for content {content_id}")
+
                         # 尝试获取完整内容详情
                         try:
                             full_content = await self._get_full_content_detail(
@@ -740,9 +750,13 @@ class ZhihuCrawler(AbstractCrawler):
         if config.ENABLE_GET_COMMENTS and all_contents:
             await self._batch_get_collection_comments(all_contents, collection_store)
 
-        # 将缓存的数据写入文件
+        # 收藏夹处理完成后，flush剩余的缓存数据（不足20条的部分）
         if hasattr(collection_store, 'flush_to_files'):
+            utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Flushing remaining cached data for collection: {collection_title}")
             await collection_store.flush_to_files()
+            utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Collection {collection_title} processing completed with final flush")
+        else:
+            utils.logger.warning(f"[ZhihuCrawler.get_collection_contents] Collection store does not support flush_to_files method")
 
     async def _batch_get_collection_comments(self, content_list: List[ZhihuContent], collection_store):
         """
@@ -927,6 +941,31 @@ class ZhihuCrawler(AbstractCrawler):
             question = content.get("question", {})
             author = content.get("author", {})
 
+            # 提取用户信息
+            user_id = str(author.get("id", ""))
+            user_nickname = author.get("name", "")
+            user_avatar = author.get("avatar_url", "")
+            user_url_token = author.get("url_token", "")
+            # 构造用户链接
+            from constant import zhihu as zhihu_constant
+            user_link = f"{zhihu_constant.ZHIHU_URL}/people/{user_url_token}" if user_url_token else ""
+
+            # 转换时间戳为可读格式
+            def convert_timestamp_to_readable(timestamp):
+                """将时间戳转换为可读格式"""
+                if timestamp == 0:
+                    return "0"
+                try:
+                    from tools.time_util import get_time_str_from_unix_time
+                    return get_time_str_from_unix_time(timestamp)
+                except Exception:
+                    return str(timestamp)
+
+            created_time_readable = convert_timestamp_to_readable(content.get("created_time", 0))
+            updated_time_readable = convert_timestamp_to_readable(content.get("updated_time", 0))
+
+            utils.logger.debug(f"[ZhihuCrawler._extract_answer_from_collection_item] Mapping fields for answer {content.get('id')}: voteup_count={content.get('voteup_count', 0)}, comment_count={content.get('comment_count', 0)}, created_time={created_time_readable}")
+
             return ZhihuContent(
                 content_id=str(content.get("id", "")),
                 content_type="answer",
@@ -934,18 +973,24 @@ class ZhihuCrawler(AbstractCrawler):
                 title=question.get("title", ""),
                 desc=content.get("excerpt", ""),
                 note_id=str(content.get("id", "")),
-                created_time=content.get("created_time", 0),
-                updated_time=content.get("updated_time", 0),
-                liked_count=content.get("voteup_count", 0),
-                comments_count=content.get("comment_count", 0),
+                created_time=created_time_readable,
+                updated_time=updated_time_readable,
+                voteup_count=content.get("voteup_count", 0),  # 修复：使用正确的字段名
+                comment_count=content.get("comment_count", 0),  # 修复：使用正确的字段名
                 shared_count=0,
                 topics=question.get("topics", []),
                 content_url_token=content.get("url", "").split("/")[-1] if content.get("url") else "",
+                # 添加用户信息到顶级字段
+                user_id=user_id,
+                user_link=user_link,
+                user_nickname=user_nickname,
+                user_avatar=user_avatar,
+                user_url_token=user_url_token,
                 author=ZhihuCreator(
-                    user_id=str(author.get("id", "")),
-                    user_nickname=author.get("name", ""),
-                    url_token=author.get("url_token", ""),
-                    user_avatar=author.get("avatar_url", ""),
+                    user_id=user_id,
+                    user_nickname=user_nickname,
+                    url_token=user_url_token,
+                    user_avatar=user_avatar,
                     gender=self._format_gender_text(author.get("gender", -1)),
                     follows=author.get("follower_count", 0),
                     fans=author.get("following_count", 0),
@@ -969,6 +1014,31 @@ class ZhihuCrawler(AbstractCrawler):
         try:
             author = content.get("author", {})
 
+            # 提取用户信息
+            user_id = str(author.get("id", ""))
+            user_nickname = author.get("name", "")
+            user_avatar = author.get("avatar_url", "")
+            user_url_token = author.get("url_token", "")
+            # 构造用户链接
+            from constant import zhihu as zhihu_constant
+            user_link = f"{zhihu_constant.ZHIHU_URL}/people/{user_url_token}" if user_url_token else ""
+
+            # 转换时间戳为可读格式
+            def convert_timestamp_to_readable(timestamp):
+                """将时间戳转换为可读格式"""
+                if timestamp == 0:
+                    return "0"
+                try:
+                    from tools.time_util import get_time_str_from_unix_time
+                    return get_time_str_from_unix_time(timestamp)
+                except Exception:
+                    return str(timestamp)
+
+            created_time_readable = convert_timestamp_to_readable(content.get("created", 0))
+            updated_time_readable = convert_timestamp_to_readable(content.get("updated", 0))
+
+            utils.logger.debug(f"[ZhihuCrawler._extract_article_from_collection_item] Mapping fields for article {content.get('id')}: voteup_count={content.get('voteup_count', 0)}, comment_count={content.get('comment_count', 0)}, created_time={created_time_readable}")
+
             return ZhihuContent(
                 content_id=str(content.get("id", "")),
                 content_type="article",
@@ -976,18 +1046,24 @@ class ZhihuCrawler(AbstractCrawler):
                 title=content.get("title", ""),
                 desc=content.get("excerpt", ""),
                 note_id=str(content.get("id", "")),
-                created_time=content.get("created", 0),
-                updated_time=content.get("updated", 0),
-                liked_count=content.get("voteup_count", 0),
-                comments_count=content.get("comment_count", 0),
+                created_time=created_time_readable,
+                updated_time=updated_time_readable,
+                voteup_count=content.get("voteup_count", 0),  # 修复：使用正确的字段名
+                comment_count=content.get("comment_count", 0),  # 修复：使用正确的字段名
                 shared_count=0,
                 topics=[],
                 content_url_token=content.get("url", "").split("/")[-1] if content.get("url") else "",
+                # 添加用户信息到顶级字段
+                user_id=user_id,
+                user_link=user_link,
+                user_nickname=user_nickname,
+                user_avatar=user_avatar,
+                user_url_token=user_url_token,
                 author=ZhihuCreator(
-                    user_id=str(author.get("id", "")),
-                    user_nickname=author.get("name", ""),
-                    url_token=author.get("url_token", ""),
-                    user_avatar=author.get("avatar_url", ""),
+                    user_id=user_id,
+                    user_nickname=user_nickname,
+                    url_token=user_url_token,
+                    user_avatar=user_avatar,
                     gender=self._format_gender_text(author.get("gender", -1)),
                     follows=author.get("follower_count", 0),
                     fans=author.get("following_count", 0),

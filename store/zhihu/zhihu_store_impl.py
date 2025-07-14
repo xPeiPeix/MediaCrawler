@@ -262,7 +262,7 @@ class ZhihuJsonStoreImplement(AbstractStore):
 class ZhihuCollectionJsonStoreImplement:
     """
     知乎收藏夹专用JSON存储实现
-    特点：内容和评论整合存储，每个文件最多20条数据
+    特点：内容和评论整合存储，每个文件最多20条数据，按收藏夹独立分片
     """
     def __init__(self):
         self.json_store_path: str = "data/zhihu/json"
@@ -273,16 +273,33 @@ class ZhihuCollectionJsonStoreImplement:
         self._content_cache: Dict[str, Dict] = {}
         self._current_file_index: int = 1
         self._current_file_count: int = 0
+        self._collection_title: str = ""  # 当前收藏夹标题
+
+    def set_collection_title(self, collection_title: str):
+        """
+        设置当前收藏夹标题，用于文件命名
+        Args:
+            collection_title: 收藏夹标题
+        """
+        # 清理文件名中的非法字符
+        import re
+        safe_title = re.sub(r'[<>:"/\\|?*]', '_', collection_title)
+        safe_title = safe_title.strip()[:50]  # 限制长度
+        self._collection_title = safe_title
+        utils.logger.info(f"[ZhihuCollectionJsonStore] Set collection title: {safe_title}")
 
     def make_save_file_name(self, file_index: int) -> str:
         """
-        生成分片文件名
+        生成分片文件名，包含收藏夹信息
         Args:
             file_index: 文件索引
         Returns:
             文件路径
         """
-        return f"{self.json_store_path}/{crawler_type_var.get()}_contents_{utils.get_current_date()}_{file_index:03d}.json"
+        if self._collection_title:
+            return f"{self.json_store_path}/{crawler_type_var.get()}_contents_{self._collection_title}_{utils.get_current_date()}_{file_index:03d}.json"
+        else:
+            return f"{self.json_store_path}/{crawler_type_var.get()}_contents_{utils.get_current_date()}_{file_index:03d}.json"
 
     def get_next_available_file_index(self) -> int:
         """
@@ -296,8 +313,11 @@ class ZhihuCollectionJsonStoreImplement:
         # 确保目录存在
         pathlib.Path(self.json_store_path).mkdir(parents=True, exist_ok=True)
 
-        # 查找当前日期的所有文件
-        pattern = f"{self.json_store_path}/{crawler_type_var.get()}_contents_{utils.get_current_date()}_*.json"
+        # 查找当前收藏夹和日期的所有文件
+        if self._collection_title:
+            pattern = f"{self.json_store_path}/{crawler_type_var.get()}_contents_{self._collection_title}_{utils.get_current_date()}_*.json"
+        else:
+            pattern = f"{self.json_store_path}/{crawler_type_var.get()}_contents_{utils.get_current_date()}_*.json"
         existing_files = glob.glob(pattern)
 
         if not existing_files:
@@ -318,9 +338,37 @@ class ZhihuCollectionJsonStoreImplement:
 
         return max_index + 1
 
+    async def _flush_current_batch(self):
+        """
+        将当前缓存的一批数据写入文件（内部方法，已持有锁）
+        """
+        if not self._content_cache:
+            return
+
+        contents = list(self._content_cache.values())
+        total_contents = len(contents)
+
+        # 获取下一个可用的文件索引
+        file_index = self.get_next_available_file_index()
+        file_path = self.make_save_file_name(file_index)
+
+        # 确保目录存在
+        pathlib.Path(self.json_store_path).mkdir(parents=True, exist_ok=True)
+
+        try:
+            async with aiofiles.open(file_path, 'w', encoding='utf-8') as file:
+                await file.write(json.dumps(contents, ensure_ascii=False, indent=4))
+
+            utils.logger.info(f"[ZhihuCollectionJsonStore] Auto-flushed {total_contents} contents to {file_path}")
+        except Exception as e:
+            utils.logger.error(f"[ZhihuCollectionJsonStore] Error auto-flushing to {file_path}: {e}")
+
+        # 清空缓存
+        self._content_cache.clear()
+
     async def store_content(self, content_item: Dict):
         """
-        存储内容数据到缓存
+        存储内容数据到缓存，达到分片阈值时自动flush
         Args:
             content_item: 内容数据
         """
@@ -330,7 +378,12 @@ class ZhihuCollectionJsonStoreImplement:
                 # 初始化评论列表
                 content_item["comments"] = []
                 self._content_cache[content_id] = content_item
-                utils.logger.info(f"[ZhihuCollectionJsonStore] Cached content: {content_id}")
+                utils.logger.info(f"[ZhihuCollectionJsonStore] Cached content: {content_id} (Total cached: {len(self._content_cache)})")
+
+                # 检查是否达到分片阈值，如果达到则自动flush
+                if len(self._content_cache) >= self.max_items_per_file:
+                    utils.logger.info(f"[ZhihuCollectionJsonStore] Reached max items per file ({self.max_items_per_file}), auto-flushing...")
+                    await self._flush_current_batch()
 
     async def store_comment(self, comment_item: Dict):
         """
@@ -349,40 +402,16 @@ class ZhihuCollectionJsonStoreImplement:
 
     async def flush_to_files(self):
         """
-        将缓存的数据写入文件
+        将剩余缓存的数据写入文件（处理不足20条的剩余内容）
         """
         async with self.lock:
             if not self._content_cache:
+                utils.logger.info(f"[ZhihuCollectionJsonStore] No remaining content to flush, cache is empty")
                 return
 
-            contents = list(self._content_cache.values())
-            total_contents = len(contents)
-
-            utils.logger.info(f"[ZhihuCollectionJsonStore] Flushing {total_contents} contents to files")
-
-            # 获取起始文件索引，避免覆盖现有文件
-            start_file_index = self.get_next_available_file_index()
-
-            # 按每个文件最多20条数据进行分片
-            for i in range(0, total_contents, self.max_items_per_file):
-                chunk = contents[i:i + self.max_items_per_file]
-                file_index = start_file_index + (i // self.max_items_per_file)
-                file_path = self.make_save_file_name(file_index)
-
-                # 确保目录存在
-                pathlib.Path(self.json_store_path).mkdir(parents=True, exist_ok=True)
-
-                try:
-                    async with aiofiles.open(file_path, 'w', encoding='utf-8') as file:
-                        await file.write(json.dumps(chunk, ensure_ascii=False, indent=4))
-
-                    utils.logger.info(f"[ZhihuCollectionJsonStore] Saved {len(chunk)} contents to {file_path}")
-                except Exception as e:
-                    utils.logger.error(f"[ZhihuCollectionJsonStore] Error saving to {file_path}: {e}")
-
-            # 清空缓存
-            self._content_cache.clear()
-            utils.logger.info(f"[ZhihuCollectionJsonStore] Flush completed, cache cleared")
+            # 直接flush剩余内容（通常是不足20条的）
+            await self._flush_current_batch()
+            utils.logger.info(f"[ZhihuCollectionJsonStore] Final flush completed")
 
     async def store_creator(self, creator: Dict):
         """
