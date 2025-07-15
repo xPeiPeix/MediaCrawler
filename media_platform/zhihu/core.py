@@ -737,7 +737,7 @@ class ZhihuCrawler(AbstractCrawler):
                             if answer_images and zhihu_content.content_text:
                                 from tools.crawler_util import replace_image_placeholders_with_filenames
                                 zhihu_content.content_text = replace_image_placeholders_with_filenames(
-                                    zhihu_content.content_text, answer_images
+                                    zhihu_content.content_text, answer_images, content_id
                                 )
                                 utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Replaced {len(answer_images)} answer image placeholders in content {content_id}")
 
@@ -745,7 +745,7 @@ class ZhihuCrawler(AbstractCrawler):
                             if question_images and zhihu_content.question_detail:
                                 from tools.crawler_util import replace_image_placeholders_with_filenames_enhanced
                                 zhihu_content.question_detail = replace_image_placeholders_with_filenames_enhanced(
-                                    zhihu_content.question_detail, question_images, "[图片]"
+                                    zhihu_content.question_detail, question_images, "[图片]", content_id
                                 )
                                 utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Replaced {len(question_images)} question image placeholders")
 
@@ -855,7 +855,7 @@ class ZhihuCrawler(AbstractCrawler):
 
                             if comment_images:
                                 # 使用增强版的占位符替换，按顺序替换
-                                self._process_comment_images_enhanced(browser_comments, comment_images)
+                                self._process_comment_images_enhanced(browser_comments, comment_images, content_item.content_id)
                                 utils.logger.info(f"[ZhihuCrawler._batch_get_collection_comments] Processed {len(comment_images)} comment image placeholders for {content_item.content_id}")
 
                         content_item.comments.extend(browser_comments)
@@ -1604,13 +1604,14 @@ class ZhihuCrawler(AbstractCrawler):
                     for img in available_images[:comment.content.count('[pic:')]:
                         img['used'] = True
 
-    def _process_comment_images_enhanced(self, comments: List[ZhihuComment], comment_images: List[Dict]):
+    def _process_comment_images_enhanced(self, comments: List[ZhihuComment], comment_images: List[Dict], content_id: str):
         """
         增强版评论图片占位符处理（方案三专用）
         按照评论和图片的顺序进行精确匹配
         Args:
             comments: 评论列表（按浏览器显示顺序）
             comment_images: 图片列表（按文件名排序）
+            content_id: 内容ID，用于构建完整路径
         """
         utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Processing {len(comments)} comments with {len(comment_images)} images")
 
@@ -1632,9 +1633,10 @@ class ZhihuCrawler(AbstractCrawler):
                     updated_content = comment.content
                     for img_info in needed_images:
                         filename = img_info['filename']
-                        old_content = updated_content
-                        updated_content = updated_content.replace("[图片]", f"[pic:{filename}]", 1)
-                        utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Replaced [图片] with [pic:{filename}] in comment {comment.comment_id}")
+                        # 新格式：[content_id/filename]
+                        replacement = f"[{content_id}/{filename}]"
+                        updated_content = updated_content.replace("[图片]", replacement, 1)
+                        utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Replaced [图片] with {replacement} in comment {comment.comment_id}")
 
                     comment.content = updated_content
                     image_index += placeholder_count

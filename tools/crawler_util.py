@@ -205,12 +205,13 @@ def extract_text_from_html(html: str) -> str:
     return clean_text
 
 
-def replace_image_placeholders_with_filenames(content_text: str, image_list: List[Dict]) -> str:
+def replace_image_placeholders_with_filenames(content_text: str, image_list: List[Dict], content_id: str = "") -> str:
     """
     将内容文本中的[图片]占位符替换为真实的图片文件名
     Args:
         content_text: 包含[图片]占位符的文本内容
         image_list: 图片信息列表，每个元素包含filename字段
+        content_id: 内容ID，用于构建完整路径
 
     Returns:
         替换后的文本内容
@@ -225,7 +226,13 @@ def replace_image_placeholders_with_filenames(content_text: str, image_list: Lis
         for i, image_info in enumerate(image_list):
             filename = image_info.get('filename', f'image_{i:03d}')
             placeholder = '[图片]'
-            replacement = f'[pic:{filename}]'
+
+            # 新格式：[content_id/filename]
+            if content_id:
+                replacement = f'[{content_id}/{filename}]'
+            else:
+                # 向后兼容：如果没有content_id，使用旧格式
+                replacement = f'[pic:{filename}]'
 
             # 只替换第一个匹配的占位符，确保顺序正确
             result_text = result_text.replace(placeholder, replacement, 1)
@@ -240,13 +247,14 @@ def replace_image_placeholders_with_filenames(content_text: str, image_list: Lis
     return result_text
 
 
-def replace_image_placeholders_with_filenames_enhanced(content_text: str, image_list: List[Dict], placeholder_type: str = "[图片]") -> str:
+def replace_image_placeholders_with_filenames_enhanced(content_text: str, image_list: List[Dict], placeholder_type: str = "[图片]", content_id: str = "") -> str:
     """
     将内容文本中的图片占位符替换为真实的图片文件名（增强版）
     Args:
         content_text: 包含图片占位符的文本内容
         image_list: 图片信息列表，每个元素包含filename字段
         placeholder_type: 占位符类型，如"[图片]"或"查看图片"
+        content_id: 内容ID，用于构建完整路径
 
     Returns:
         替换后的文本内容
@@ -260,7 +268,13 @@ def replace_image_placeholders_with_filenames_enhanced(content_text: str, image_
     if image_list:
         for i, image_info in enumerate(image_list):
             filename = image_info.get('filename', f'image_{i:03d}')
-            replacement = f'[pic:{filename}]'
+
+            # 新格式：[content_id/filename]
+            if content_id:
+                replacement = f'[{content_id}/{filename}]'
+            else:
+                # 向后兼容：如果没有content_id，使用旧格式
+                replacement = f'[pic:{filename}]'
 
             # 只替换第一个匹配的占位符，确保顺序正确
             result_text = result_text.replace(placeholder_type, replacement, 1)
