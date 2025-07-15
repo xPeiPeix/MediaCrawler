@@ -824,6 +824,11 @@ class ZhihuCrawler(AbstractCrawler):
                         # 从浏览器解析评论
                         browser_comments = await self._parse_comments_from_browser(content_item.content_id)
 
+                        # 应用热门评论筛选（如果启用）
+                        if config.ENABLE_HOT_COMMENTS and browser_comments:
+                            browser_comments = self._filter_hot_comments(browser_comments)
+                            utils.logger.info(f"[ZhihuCrawler._batch_get_collection_comments] Applied hot comments filter, got {len(browser_comments)} hot comments for {content_item.content_id}")
+
                         # 在添加评论之前处理图片占位符
                         # 检测浏览器解析的评论中是否有图片占位符
                         has_comment_images = False
