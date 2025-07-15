@@ -834,6 +834,14 @@ class ZhihuCrawler(AbstractCrawler):
 
                     utils.logger.info(f"[ZhihuCrawler._batch_get_collection_comments] Got {len(content_item.comments)} comments for content: {content_item.content_id}")
 
+                    # 检测评论中的图片（如果不跳过评论图片处理的话）
+                    if not config.SKIP_COMMENTS_PIC and content_item.comments:
+                        for comment in content_item.comments:
+                            if "查看图片" in comment.content or "[图片]" in comment.content:
+                                content_item.has_comment_images = True
+                                utils.logger.info(f"[ZhihuCrawler._batch_get_collection_comments] Detected comment images in content: {content_item.content_id}")
+                                break
+
                     # 处理评论中的图片占位符（如果不跳过评论图片处理且有评论图片的话）
                     if not config.SKIP_COMMENTS_PIC and content_item.comments and content_item.images_processed:
                         # 查找该内容的评论图片
@@ -1148,14 +1156,8 @@ class ZhihuCrawler(AbstractCrawler):
         # 检测答案图片
         zhihu_content.has_answer_images = "[图片]" in desc or "[图片]" in content
 
-        # 检测评论图片（如果不跳过评论图片处理的话）
-        if not config.SKIP_COMMENTS_PIC and zhihu_content.comments:
-            for comment in zhihu_content.comments:
-                if "查看图片" in comment.content or "[图片]" in comment.content:
-                    zhihu_content.has_comment_images = True
-                    break
-        else:
-            zhihu_content.has_comment_images = False
+        # 评论图片检测将在评论获取后进行，这里先设为默认值
+        zhihu_content.has_comment_images = False
 
         # 记录检测结果
         if zhihu_content.has_question_images or zhihu_content.has_answer_images or zhihu_content.has_comment_images:
