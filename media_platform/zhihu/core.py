@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Tuple, cast
 
 from playwright.async_api import (BrowserContext, BrowserType, Page, Playwright,
                                   async_playwright)
+from bs4 import BeautifulSoup
 
 import config
 from constant import zhihu as constant
@@ -811,18 +812,69 @@ class ZhihuCrawler(AbstractCrawler):
         async def get_content_comments(content_item: ZhihuContent):
             async with semaphore:
                 try:
-                    if config.ENABLE_HOT_COMMENTS:
-                        await self._get_hot_comments(content_item, is_collection_crawl=True)
+                    # 如果不跳过评论图片处理且已经处理过图片，使用浏览器解析评论（方案三）
+                    if not config.SKIP_COMMENTS_PIC and content_item.images_processed:
+                        # 导航到内容页面
+                        await self.context_page.goto(content_item.content_url)
+                        await asyncio.sleep(2)
+
+                        # 展开评论（只展开第一个评论区）
+                        await self._expand_comments_single()
+
+                        # 从浏览器解析评论
+                        browser_comments = await self._parse_comments_from_browser(content_item.content_id)
+
+                        # 在添加评论之前处理图片占位符
+                        # 检测浏览器解析的评论中是否有图片占位符
+                        has_comment_images = False
+                        if browser_comments:
+                            for comment in browser_comments:
+                                if "[图片]" in comment.content:
+                                    has_comment_images = True
+                                    content_item.has_comment_images = True
+                                    utils.logger.info(f"[ZhihuCrawler._batch_get_collection_comments] Detected comment images in browser comments for {content_item.content_id}")
+                                    break
+
+                        if browser_comments and has_comment_images:
+                            # 查找该内容的评论图片
+                            image_dir = f"data/zhihu/images/collection_contents/{content_item.content_id}"
+                            comment_images = []
+
+                            # 扫描图片目录，找出评论图片，按文件名排序确保顺序
+                            import os
+                            if os.path.exists(image_dir):
+                                comment_files = []
+                                for filename in os.listdir(image_dir):
+                                    if filename.startswith('comment_') and filename.endswith(('.jpg', '.png', '.jpeg', '.webp')):
+                                        comment_files.append(filename)
+
+                                # 按文件名排序，确保comment_000.jpg在comment_001.jpg前面
+                                comment_files.sort()
+                                for filename in comment_files:
+                                    comment_images.append({'filename': filename})
+
+                            if comment_images:
+                                # 使用增强版的占位符替换，按顺序替换
+                                self._process_comment_images_enhanced(browser_comments, comment_images)
+                                utils.logger.info(f"[ZhihuCrawler._batch_get_collection_comments] Processed {len(comment_images)} comment image placeholders for {content_item.content_id}")
+
+                        content_item.comments.extend(browser_comments)
+                        utils.logger.info(f"[ZhihuCrawler._batch_get_collection_comments] Parsed {len(browser_comments)} comments from browser for {content_item.content_id}")
+
                     else:
-                        # 获取所有评论，不使用回调函数，直接返回评论数据
-                        comments_data = await self.zhihu_client.get_note_all_comments(
-                            content=content_item,
-                            crawl_interval=random.random(),
-                            callback=None
-                        )
-                        # 手动将评论数据添加到content_item.comments中
-                        if comments_data and isinstance(comments_data, list):
-                            content_item.comments.extend(comments_data)
+                        # 使用原有的API方式获取评论
+                        if config.ENABLE_HOT_COMMENTS:
+                            await self._get_hot_comments(content_item, is_collection_crawl=True)
+                        else:
+                            # 获取所有评论，不使用回调函数，直接返回评论数据
+                            comments_data = await self.zhihu_client.get_note_all_comments(
+                                content=content_item,
+                                crawl_interval=random.random(),
+                                callback=None
+                            )
+                            # 手动将评论数据添加到content_item.comments中
+                            if comments_data and isinstance(comments_data, list):
+                                content_item.comments.extend(comments_data)
 
                     # 将评论添加到收藏夹存储
                     if hasattr(collection_store, 'store_comment'):
@@ -830,34 +882,33 @@ class ZhihuCrawler(AbstractCrawler):
                             comment_data = comment.model_dump()
                             comment_data["content_id"] = content_item.content_id
                             comment_data["content_type"] = content_item.content_type
+
+                            # 如果是浏览器解析的评论，移除无效字段
+                            if not config.SKIP_COMMENTS_PIC and content_item.images_processed:
+                                # 移除浏览器解析评论中的无效字段
+                                invalid_fields = ['sub_comment_count', 'dislike_count', 'user_id', 'user_avatar']
+                                for field in invalid_fields:
+                                    comment_data.pop(field, None)
+
+                            # 调试日志：检查评论内容
+                            if "[图片]" in comment_data["content"] or "[pic:" in comment_data["content"]:
+                                utils.logger.info(f"[ZhihuCrawler._batch_get_collection_comments] Storing comment {comment.comment_id}: {comment_data['content'][:100]}")
+
                             await collection_store.store_comment(comment_data)
 
                     utils.logger.info(f"[ZhihuCrawler._batch_get_collection_comments] Got {len(content_item.comments)} comments for content: {content_item.content_id}")
 
-                    # 检测评论中的图片（如果不跳过评论图片处理的话）
-                    if not config.SKIP_COMMENTS_PIC and content_item.comments:
+                    # 检测评论中的图片（如果不跳过评论图片处理且使用API方式获取评论的话）
+                    if not config.SKIP_COMMENTS_PIC and content_item.comments and not content_item.images_processed:
                         for comment in content_item.comments:
                             if "查看图片" in comment.content or "[图片]" in comment.content:
                                 content_item.has_comment_images = True
                                 utils.logger.info(f"[ZhihuCrawler._batch_get_collection_comments] Detected comment images in content: {content_item.content_id}")
                                 break
 
-                    # 处理评论中的图片占位符（如果不跳过评论图片处理且有评论图片的话）
-                    if not config.SKIP_COMMENTS_PIC and content_item.comments and content_item.images_processed:
-                        # 查找该内容的评论图片
-                        image_dir = f"data/zhihu/images/collection_contents/{content_item.content_id}"
-                        comment_images = []
-
-                        # 扫描图片目录，找出评论图片
-                        import os
-                        if os.path.exists(image_dir):
-                            for filename in os.listdir(image_dir):
-                                if filename.startswith('comment_') and filename.endswith(('.jpg', '.png', '.jpeg', '.webp')):
-                                    comment_images.append({'filename': filename})
-
-                        if comment_images:
-                            self._process_comment_images(content_item.comments, comment_images)
-                            utils.logger.info(f"[ZhihuCrawler._batch_get_collection_comments] Processed {len(comment_images)} comment image placeholders for {content_item.content_id}")
+                    # 确保在skip-comments-pic模式下，has_comment_images永远为False
+                    if config.SKIP_COMMENTS_PIC:
+                        content_item.has_comment_images = False
 
                 except Exception as e:
                     utils.logger.error(f"[ZhihuCrawler._batch_get_collection_comments] Error getting comments for {content_item.content_id}: {e}")
@@ -1358,6 +1409,158 @@ class ZhihuCrawler(AbstractCrawler):
         except Exception as e:
             utils.logger.warning(f"[ZhihuCrawler._expand_comments] Error expanding comments: {e}")
 
+    async def _expand_comments_single(self):
+        """
+        展开评论（只展开第一个评论区，用于方案三）
+        """
+        try:
+            # 等待页面加载
+            await asyncio.sleep(2)
+
+            # 方法1：通过更精确的选择器查找评论按钮
+            comment_buttons = await self.context_page.query_selector_all('.ContentItem-actions button[class*="Comment"]')
+
+            if comment_buttons:
+                # 找到评论按钮，验证文本内容
+                for button in comment_buttons:
+                    button_text = await button.inner_text()
+                    # 检查是否为评论按钮（包含"评论"或数字+"条评论"）
+                    if "评论" in button_text or "条评论" in button_text:
+                        utils.logger.info(f"[ZhihuCrawler._expand_comments_single] Found comment button with text: {button_text}")
+
+                        await button.click()
+                        utils.logger.info(f"[ZhihuCrawler._expand_comments_single] Clicked comment button")
+
+                        # 等待评论加载
+                        await asyncio.sleep(3)
+                        utils.logger.info(f"[ZhihuCrawler._expand_comments_single] Comment section expanded")
+                        return
+
+                utils.logger.warning(f"[ZhihuCrawler._expand_comments_single] Found buttons but none are comment buttons")
+
+            # 方法2：备用选择器 - 通过按钮文本直接查找
+            all_buttons = await self.context_page.query_selector_all('.ContentItem-actions button')
+            if all_buttons:
+                for button in all_buttons:
+                    try:
+                        button_text = await button.inner_text()
+                        # 检查是否为评论按钮
+                        if "评论" in button_text or "条评论" in button_text:
+                            utils.logger.info(f"[ZhihuCrawler._expand_comments_single] Found comment button using backup method: {button_text}")
+
+                            await button.click()
+                            utils.logger.info(f"[ZhihuCrawler._expand_comments_single] Clicked comment button")
+
+                            # 等待评论加载
+                            await asyncio.sleep(3)
+                            utils.logger.info(f"[ZhihuCrawler._expand_comments_single] Comment section expanded")
+                            return
+                    except Exception as e:
+                        # 跳过无法获取文本的按钮
+                        continue
+
+                utils.logger.warning(f"[ZhihuCrawler._expand_comments_single] No comment buttons found in {len(all_buttons)} buttons")
+            else:
+                utils.logger.warning(f"[ZhihuCrawler._expand_comments_single] No buttons found at all")
+
+        except Exception as e:
+            utils.logger.warning(f"[ZhihuCrawler._expand_comments_single] Error expanding comment section: {e}")
+
+    async def _parse_comments_from_browser(self, content_id: str) -> List[ZhihuComment]:
+        """
+        从浏览器页面直接解析评论内容和图片（方案三）
+        只在非--skip-comments-pic模式下使用
+        Args:
+            content_id: 内容ID
+        Returns:
+            List[ZhihuComment]: 解析出的评论列表
+        """
+        comments = []
+        try:
+            # 获取页面HTML
+            html_content = await self.context_page.content()
+            soup = BeautifulSoup(html_content, 'html.parser')
+
+            # 查找所有评论容器
+            comment_containers = soup.select('div[data-id]')
+            utils.logger.info(f"[ZhihuCrawler._parse_comments_from_browser] Found {len(comment_containers)} comment containers")
+
+            for container in comment_containers:
+                try:
+                    # 获取评论ID
+                    comment_id = container.get('data-id')
+                    if not comment_id:
+                        continue
+
+                    # 获取评论内容
+                    content_elem = container.select_one('.CommentContent.css-1jpzztt')
+                    if not content_elem:
+                        continue
+
+                    # 提取评论文本内容（排除图片）
+                    comment_text = ""
+                    for elem in content_elem.children:
+                        if hasattr(elem, 'name'):
+                            if elem.name == 'div' and 'comment_img' in elem.get('class', []):
+                                # 遇到图片容器，添加占位符
+                                comment_text += "[图片]"
+                            elif elem.name == 'img' and 'sticker' in elem.get('class', []):
+                                # 跳过表情图片
+                                continue
+                            else:
+                                comment_text += elem.get_text()
+                        else:
+                            comment_text += str(elem)
+
+                    # 获取用户信息
+                    user_link_elem = container.select_one('a.css-10u695f')
+                    user_nickname = user_link_elem.get_text() if user_link_elem else "未知用户"
+                    user_link = user_link_elem.get('href') if user_link_elem else ""
+
+                    # 获取点赞数
+                    like_buttons = container.select('button.css-1vd72tl')
+                    like_count = 0
+                    if like_buttons:
+                        like_text = like_buttons[-1].get_text()
+                        try:
+                            like_count = int(''.join(filter(str.isdigit, like_text)))
+                        except:
+                            like_count = 0
+
+                    # 获取时间信息
+                    time_elem = container.select_one('.css-12cl38p')
+                    publish_time = time_elem.get_text() if time_elem else ""
+
+                    # 获取IP位置
+                    ip_elem = container.select_one('.css-ntkn7q')
+                    ip_location = ip_elem.get_text() if ip_elem else ""
+
+                    # 创建评论对象（移除无效字段）
+                    comment = ZhihuComment(
+                        comment_id=comment_id,
+                        parent_comment_id="0",  # 只获取第一层评论
+                        content=comment_text.strip(),
+                        publish_time=publish_time,
+                        ip_location=ip_location,
+                        like_count=like_count,
+                        user_link=user_link,
+                        user_nickname=user_nickname
+                    )
+
+                    comments.append(comment)
+                    utils.logger.debug(f"[ZhihuCrawler._parse_comments_from_browser] Parsed comment {comment_id}: {comment_text[:50]}...")
+
+                except Exception as e:
+                    utils.logger.warning(f"[ZhihuCrawler._parse_comments_from_browser] Error parsing comment container: {e}")
+                    continue
+
+            utils.logger.info(f"[ZhihuCrawler._parse_comments_from_browser] Successfully parsed {len(comments)} comments for {content_id}")
+            return comments
+
+        except Exception as e:
+            utils.logger.error(f"[ZhihuCrawler._parse_comments_from_browser] Error parsing comments from browser: {e}")
+            return []
+
     def _process_comment_images(self, comments: List[ZhihuComment], comment_images: List[Dict]):
         """
         处理评论中的图片占位符
@@ -1400,6 +1603,48 @@ class ZhihuCrawler(AbstractCrawler):
                     # 标记已使用的图片
                     for img in available_images[:comment.content.count('[pic:')]:
                         img['used'] = True
+
+    def _process_comment_images_enhanced(self, comments: List[ZhihuComment], comment_images: List[Dict]):
+        """
+        增强版评论图片占位符处理（方案三专用）
+        按照评论和图片的顺序进行精确匹配
+        Args:
+            comments: 评论列表（按浏览器显示顺序）
+            comment_images: 图片列表（按文件名排序）
+        """
+        utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Processing {len(comments)} comments with {len(comment_images)} images")
+
+        image_index = 0
+        total_replaced = 0
+
+        for comment in comments:
+            # 统计当前评论中的图片占位符数量
+            placeholder_count = comment.content.count("[图片]")
+
+            if placeholder_count > 0:
+                utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Comment {comment.comment_id} has {placeholder_count} placeholders: {comment.content[:100]}")
+
+                if image_index < len(comment_images):
+                    # 获取当前评论需要的图片
+                    needed_images = comment_images[image_index:image_index + placeholder_count]
+
+                    # 逐个替换占位符
+                    updated_content = comment.content
+                    for img_info in needed_images:
+                        filename = img_info['filename']
+                        old_content = updated_content
+                        updated_content = updated_content.replace("[图片]", f"[pic:{filename}]", 1)
+                        utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Replaced [图片] with [pic:{filename}] in comment {comment.comment_id}")
+
+                    comment.content = updated_content
+                    image_index += placeholder_count
+                    total_replaced += placeholder_count
+
+                    utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Updated comment {comment.comment_id}: {comment.content[:100]}")
+                else:
+                    utils.logger.warning(f"[ZhihuCrawler._process_comment_images_enhanced] Not enough images for comment {comment.comment_id}, need {placeholder_count} but only {len(comment_images) - image_index} remaining")
+
+        utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Total replaced {total_replaced} placeholders")
 
     async def process_content_images_with_info(self, zhihu_content: ZhihuContent) -> List[Dict]:
         """
