@@ -41,6 +41,8 @@ async def parse_cmd():
                         choices=['full', 'incremental'], default='full')
     parser.add_argument('--max_count', type=int,
                         help='max count of items to crawl per collection (0 means no limit). Example: --max_count 3 will crawl only first 3 items from each collection', default=config.CRAWLER_MAX_COLLECTION_ITEMS_COUNT)
+    parser.add_argument('--skip-comments-pic', action='store_true',
+                        help='skip processing images in comments for faster crawling (only process question and answer images)', default=config.SKIP_COMMENTS_PIC)
 
     args = parser.parse_args()
 
@@ -56,3 +58,4 @@ async def parse_cmd():
     config.COOKIES = args.cookies
     config.CRAWL_MODE = args.mode
     config.CRAWLER_MAX_COLLECTION_ITEMS_COUNT = args.max_count
+    config.SKIP_COMMENTS_PIC = getattr(args, 'skip_comments_pic', config.SKIP_COMMENTS_PIC)

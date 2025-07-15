@@ -24,7 +24,9 @@ class ZhihuContent(BaseModel):
     content_text: str = Field(default="", description="内容文本, 如果是视频类型这里为空")
 
     content_url: str = Field(default="", description="内容落地链接")
-    has_images: bool = Field(default=False, description="是否包含图片")
+    has_question_images: bool = Field(default=False, description="问题中是否包含图片")
+    has_answer_images: bool = Field(default=False, description="答案中是否包含图片")
+    has_comment_images: bool = Field(default=False, description="评论中是否包含图片")
     images_processed: bool = Field(default=False, description="图片是否已处理")
     question_id: str = Field(default="", description="问题ID, type为answer时有值")
     # 问题详情相关字段（第二阶段新增）

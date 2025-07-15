@@ -24,10 +24,22 @@ HOT_COMMENTS_COUNT = 10
 MIN_COMMENT_LIKES = 5
 ```
 
-### 3️⃣ 高级用法
+### 3️⃣ 图片爬取功能
 ```bash
-# 增量模式 + 数量限制 + 热门评论
+# 完整模式：爬取问题、答案、评论中的所有图片
+python main.py --platform zhihu --lt qrcode --type collection --max_count 5
+
+# 性能优化模式：跳过评论图片，提升处理速度
+python main.py --platform zhihu --lt qrcode --type collection --max_count 5 --skip-comments-pic
+```
+
+### 4️⃣ 高级用法
+```bash
+# 增量模式 + 数量限制 + 热门评论 + 图片处理
 python main.py --platform zhihu --lt qrcode --type collection --mode incremental --max_count 5
+
+# 高性能模式：增量 + 跳过评论图片
+python main.py --platform zhihu --lt qrcode --type collection --mode incremental --max_count 5 --skip-comments-pic
 ```
 
 ## ⚙️ 完整配置说明
@@ -44,6 +56,10 @@ MIN_COMMENT_LIKES = 1                # 热门评论最小点赞数阈值
 
 # 数量限制配置
 CRAWLER_MAX_COLLECTION_ITEMS_COUNT = 0  # 单个收藏夹最大爬取条数，0表示不限制
+
+# 图片处理配置
+ENABLE_GET_IMAGES = True                 # 是否启用图片爬取功能
+SKIP_COMMENTS_PIC = False               # 是否跳过评论区图片处理（性能优化）
 ```
 
 ### 配置参数详解
@@ -121,13 +137,31 @@ python main.py --platform zhihu --lt qrcode --type collection --max_count 3
 # 在 config/base_config.py 中设置：CRAWLER_MAX_COLLECTION_ITEMS_COUNT = 10
 ```
 
-#### 3. 组合使用
+#### 3. 图片爬取功能
+```bash
+# 完整图片模式（默认）：爬取问题、答案、评论中的所有图片
+python main.py --platform zhihu --lt qrcode --type collection --max_count 5
+
+# 性能优化模式：跳过评论图片处理，提升速度
+python main.py --platform zhihu --lt qrcode --type collection --max_count 5 --skip-comments-pic
+```
+
+**图片功能特点：**
+- 🎯 **多类型支持**：自动识别问题、答案、评论中的图片
+- 🚀 **性能优化**：`--skip-comments-pic` 参数跳过评论图片处理
+- 📁 **统一管理**：同一内容的所有图片保存在同一文件夹
+- 🏷️ **占位符替换**：自动将 `[图片]` 替换为实际文件名 `[pic:image_000.jpg]`
+
+#### 4. 组合使用
 ```bash
 # 增量模式 + 数量限制
 python main.py --platform zhihu --lt qrcode --type collection --mode incremental --max_count 5
 
-# 完整功能组合
+# 完整功能组合（包含图片）
 python main.py --platform zhihu --lt qrcode --type collection --max_count 10 --mode incremental
+
+# 高性能组合（跳过评论图片）
+python main.py --platform zhihu --lt qrcode --type collection --max_count 10 --mode incremental --skip-comments-pic
 ```
 
 ### 常用场景

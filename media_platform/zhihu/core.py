@@ -696,22 +696,6 @@ class ZhihuCrawler(AbstractCrawler):
                         except Exception as e:
                             utils.logger.error(f"[ZhihuCrawler.get_collection_contents] Error getting full content for {content_title}: {e}")
 
-                        # 检测是否包含图片
-                        zhihu_content.has_images = self._detect_images_in_content(zhihu_content)
-
-                        # 处理图片并获取图片信息（一步到位）
-                        images_info = []
-                        if config.ENABLE_GET_IMAGES and zhihu_content.has_images:
-                            images_info = await self._process_images_with_browser(zhihu_content)
-                            zhihu_content.images_processed = True
-
-                            # 将content_text中的[图片]占位符替换为真实的图片文件名
-                            if images_info and zhihu_content.content_text:
-                                zhihu_content.content_text = replace_image_placeholders_with_filenames(
-                                    zhihu_content.content_text, images_info
-                                )
-                                utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Replaced {len(images_info)} image placeholders in content {content_id}")
-
                         # 获取问题详情（第二阶段新增功能）
                         if zhihu_content.content_type == "answer" and zhihu_content.question_id:
                             question_info = await self._get_question_info_with_cache(zhihu_content.question_id)
@@ -723,6 +707,51 @@ class ZhihuCrawler(AbstractCrawler):
                                 zhihu_content.question_answer_count = question_info.get("question_answer_count", 0)
                                 zhihu_content.question_view_count = question_info.get("question_view_count", 0)
                                 utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Added question info for answer {content_id}")
+
+                        # 检测是否包含图片（在获取问题详情之后）
+                        self._detect_images_in_content(zhihu_content)
+
+                        # 处理图片并获取图片信息（一步到位）
+                        images_info = []
+                        # 根据跳过评论图片模式决定是否需要打开浏览器
+                        needs_browser = False
+                        if config.ENABLE_GET_IMAGES:
+                            if config.SKIP_COMMENTS_PIC:
+                                # 跳过评论图片模式：只有问题或答案有图片才打开浏览器
+                                needs_browser = zhihu_content.has_question_images or zhihu_content.has_answer_images
+                            else:
+                                # 完整模式：有任何图片都打开浏览器
+                                needs_browser = zhihu_content.has_question_images or zhihu_content.has_answer_images or zhihu_content.has_comment_images
+
+                        if needs_browser:
+                            images_info = await self._process_images_with_browser(zhihu_content)
+                            zhihu_content.images_processed = True
+
+                            # 分类图片信息
+                            question_images = [img for img in images_info if img['filename'].startswith('question_')]
+                            answer_images = [img for img in images_info if img['filename'].startswith('answer_')]
+                            comment_images = [img for img in images_info if img['filename'].startswith('comment_')]
+
+                            # 将content_text中的[图片]占位符替换为真实的图片文件名（仅答案图片）
+                            if answer_images and zhihu_content.content_text:
+                                from tools.crawler_util import replace_image_placeholders_with_filenames
+                                zhihu_content.content_text = replace_image_placeholders_with_filenames(
+                                    zhihu_content.content_text, answer_images
+                                )
+                                utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Replaced {len(answer_images)} answer image placeholders in content {content_id}")
+
+                            # 处理问题详情中的图片占位符
+                            if question_images and zhihu_content.question_detail:
+                                from tools.crawler_util import replace_image_placeholders_with_filenames_enhanced
+                                zhihu_content.question_detail = replace_image_placeholders_with_filenames_enhanced(
+                                    zhihu_content.question_detail, question_images, "[图片]"
+                                )
+                                utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Replaced {len(question_images)} question image placeholders")
+
+                            # 处理评论中的图片占位符
+                            if comment_images and zhihu_content.comments:
+                                self._process_comment_images(zhihu_content.comments, comment_images)
+                                utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Processed {len(comment_images)} comment images")
 
                         all_contents.append(zhihu_content)
                         # 保存内容到收藏夹专用存储
@@ -804,6 +833,23 @@ class ZhihuCrawler(AbstractCrawler):
                             await collection_store.store_comment(comment_data)
 
                     utils.logger.info(f"[ZhihuCrawler._batch_get_collection_comments] Got {len(content_item.comments)} comments for content: {content_item.content_id}")
+
+                    # 处理评论中的图片占位符（如果不跳过评论图片处理且有评论图片的话）
+                    if not config.SKIP_COMMENTS_PIC and content_item.comments and content_item.images_processed:
+                        # 查找该内容的评论图片
+                        image_dir = f"data/zhihu/images/collection_contents/{content_item.content_id}"
+                        comment_images = []
+
+                        # 扫描图片目录，找出评论图片
+                        import os
+                        if os.path.exists(image_dir):
+                            for filename in os.listdir(image_dir):
+                                if filename.startswith('comment_') and filename.endswith(('.jpg', '.png', '.jpeg', '.webp')):
+                                    comment_images.append({'filename': filename})
+
+                        if comment_images:
+                            self._process_comment_images(content_item.comments, comment_images)
+                            utils.logger.info(f"[ZhihuCrawler._batch_get_collection_comments] Processed {len(comment_images)} comment image placeholders for {content_item.content_id}")
 
                 except Exception as e:
                     utils.logger.error(f"[ZhihuCrawler._batch_get_collection_comments] Error getting comments for {content_item.content_id}: {e}")
@@ -1085,30 +1131,35 @@ class ZhihuCrawler(AbstractCrawler):
             utils.logger.error(f"[ZhihuCrawler._extract_article_from_collection_item] Error extracting article: {e}")
             return None
 
-    def _detect_images_in_content(self, zhihu_content: ZhihuContent) -> bool:
+    def _detect_images_in_content(self, zhihu_content: ZhihuContent) -> None:
         """
-        检测内容中是否包含图片
+        检测内容中是否包含图片，分别设置三个标志
         Args:
             zhihu_content: 知乎内容对象
-
-        Returns:
-            bool: 是否包含图片
         """
         # 检查描述和内容中是否有图片占位符
         desc = zhihu_content.desc or ""
         content = zhihu_content.content_text or ""
+        question_detail = zhihu_content.question_detail or ""
 
-        # 检测图片占位符
-        has_image_placeholder = "[图片]" in desc or "[图片]" in content
+        # 检测问题图片
+        zhihu_content.has_question_images = "[图片]" in question_detail
 
-        # 主要通过占位符检测图片，HTML检测在浏览器阶段进行
+        # 检测答案图片
+        zhihu_content.has_answer_images = "[图片]" in desc or "[图片]" in content
 
-        result = has_image_placeholder
+        # 检测评论图片（如果不跳过评论图片处理的话）
+        if not config.SKIP_COMMENTS_PIC and zhihu_content.comments:
+            for comment in zhihu_content.comments:
+                if "查看图片" in comment.content or "[图片]" in comment.content:
+                    zhihu_content.has_comment_images = True
+                    break
+        else:
+            zhihu_content.has_comment_images = False
 
-        if result:
-            utils.logger.info(f"[ZhihuCrawler._detect_images_in_content] Detected images in content {zhihu_content.content_id}")
-
-        return result
+        # 记录检测结果
+        if zhihu_content.has_question_images or zhihu_content.has_answer_images or zhihu_content.has_comment_images:
+            utils.logger.info(f"[ZhihuCrawler._detect_images_in_content] Detected images in content {zhihu_content.content_id}: question={zhihu_content.has_question_images}, answer={zhihu_content.has_answer_images}, comment={zhihu_content.has_comment_images}")
 
     async def _process_images_with_browser(self, zhihu_content: ZhihuContent) -> List[Dict]:
         """
@@ -1131,6 +1182,19 @@ class ZhihuCrawler(AbstractCrawler):
             # 使用现有浏览器会话获取HTML
             await self.context_page.goto(content_url, wait_until='networkidle')
             await asyncio.sleep(3)  # 等待页面完全加载
+
+            # 尝试点击"显示全部"按钮展开问题内容
+            await self._expand_question_content()
+
+            # 尝试点击答案的展开按钮（如果有）
+            await self._expand_answer_content()
+
+            # 尝试点击评论展开按钮（如果不跳过评论图片处理的话）
+            if not config.SKIP_COMMENTS_PIC:
+                await self._expand_comments()
+
+            # 等待内容完全展开
+            await asyncio.sleep(3)
 
             # 获取页面HTML
             page_html = await self.context_page.content()
@@ -1193,6 +1257,147 @@ class ZhihuCrawler(AbstractCrawler):
         except Exception as e:
             utils.logger.error(f"[ZhihuCrawler._process_images_with_browser] Error processing images for {content_id}: {e}")
             return []
+
+    async def _expand_question_content(self):
+        """
+        尝试展开问题详情内容
+        """
+        try:
+            # 尝试查找并点击问题的"显示全部"按钮
+            show_all_button_selector = 'button.QuestionRichText-more, button.Button.QuestionRichText-more'
+            show_all_button = await self.context_page.query_selector(show_all_button_selector)
+
+            if show_all_button:
+                utils.logger.info("[ZhihuCrawler._expand_question_content] Found 'Show All' button for question, clicking...")
+                await show_all_button.click()
+                await asyncio.sleep(1)  # 等待内容展开
+                utils.logger.info("[ZhihuCrawler._expand_question_content] Question content expanded")
+            else:
+                utils.logger.info("[ZhihuCrawler._expand_question_content] No 'Show All' button found for question")
+
+        except Exception as e:
+            utils.logger.warning(f"[ZhihuCrawler._expand_question_content] Error expanding question content: {e}")
+
+    async def _expand_answer_content(self):
+        """
+        尝试展开答案内容
+        """
+        try:
+            # 尝试查找并点击答案的"显示全部"按钮
+            answer_show_all_selector = '.RichContent-inner button.Button.ContentItem-expandButton'
+            answer_show_all_buttons = await self.context_page.query_selector_all(answer_show_all_selector)
+
+            if answer_show_all_buttons:
+                utils.logger.info(f"[ZhihuCrawler._expand_answer_content] Found {len(answer_show_all_buttons)} 'Show All' buttons for answers")
+                for i, button in enumerate(answer_show_all_buttons):
+                    try:
+                        await button.click()
+                        utils.logger.info(f"[ZhihuCrawler._expand_answer_content] Clicked 'Show All' button {i+1}")
+                        await asyncio.sleep(0.5)  # 短暂等待，避免点击过快
+                    except Exception as e:
+                        utils.logger.warning(f"[ZhihuCrawler._expand_answer_content] Error clicking button {i+1}: {e}")
+
+                # 等待所有内容展开
+                await asyncio.sleep(1)
+                utils.logger.info("[ZhihuCrawler._expand_answer_content] Answer content expanded")
+            else:
+                utils.logger.info("[ZhihuCrawler._expand_answer_content] No 'Show All' buttons found for answers")
+
+        except Exception as e:
+            utils.logger.warning(f"[ZhihuCrawler._expand_answer_content] Error expanding answer content: {e}")
+
+    async def _expand_comments(self):
+        """
+        尝试展开评论区域
+        """
+        try:
+            # 查找评论展开按钮
+            comment_button_selectors = [
+                'button.ContentItem-action[class*="Button--withLabel"]',  # 基于info.txt中的信息
+                'button.ContentItem-action',
+                '.ContentItem-actions button[class*="Comment"]',
+                '.RichContent-actions button[class*="Comment"]'
+            ]
+
+            comment_buttons = []
+            for selector in comment_button_selectors:
+                buttons = await self.context_page.query_selector_all(selector)
+                if buttons:
+                    # 过滤出包含"条评论"文本的按钮
+                    for button in buttons:
+                        try:
+                            button_text = await button.inner_text()
+                            if "条评论" in button_text:
+                                comment_buttons.append(button)
+                                utils.logger.info(f"[ZhihuCrawler._expand_comments] Found comment button with text: {button_text}")
+                        except Exception as e:
+                            utils.logger.debug(f"[ZhihuCrawler._expand_comments] Error getting button text: {e}")
+
+                    if comment_buttons:
+                        utils.logger.info(f"[ZhihuCrawler._expand_comments] Found comment buttons using selector: {selector}")
+                        break
+
+            if comment_buttons:
+                utils.logger.info(f"[ZhihuCrawler._expand_comments] Found {len(comment_buttons)} comment buttons to click")
+                for i, button in enumerate(comment_buttons):
+                    try:
+                        await button.click()
+                        utils.logger.info(f"[ZhihuCrawler._expand_comments] Clicked comment button {i+1}")
+                        await asyncio.sleep(1)  # 等待评论加载
+                    except Exception as e:
+                        utils.logger.warning(f"[ZhihuCrawler._expand_comments] Error clicking comment button {i+1}: {e}")
+
+                # 等待评论完全加载
+                await asyncio.sleep(2)
+                utils.logger.info("[ZhihuCrawler._expand_comments] Comments expanded")
+            else:
+                utils.logger.info("[ZhihuCrawler._expand_comments] No comment buttons found")
+
+        except Exception as e:
+            utils.logger.warning(f"[ZhihuCrawler._expand_comments] Error expanding comments: {e}")
+
+    def _process_comment_images(self, comments: List[ZhihuComment], comment_images: List[Dict]):
+        """
+        处理评论中的图片占位符
+
+        Args:
+            comments: 评论列表
+            comment_images: 评论图片信息列表
+        """
+        if not comments or not comment_images:
+            return
+
+        from tools.crawler_util import replace_image_placeholders_with_filenames_enhanced
+
+        # 为每个评论处理图片占位符
+        for comment in comments:
+            # 处理"查看图片"占位符
+            if "查看图片" in comment.content:
+                # 找出当前未使用的图片
+                available_images = [img for img in comment_images if not img.get('used', False)]
+                if available_images:
+                    # 替换占位符
+                    comment.content = replace_image_placeholders_with_filenames_enhanced(
+                        comment.content, available_images, "查看图片"
+                    )
+
+                    # 标记已使用的图片
+                    for img in available_images[:comment.content.count('[pic:')]:
+                        img['used'] = True
+
+            # 处理"[图片]"占位符
+            if "[图片]" in comment.content:
+                # 找出当前未使用的图片
+                available_images = [img for img in comment_images if not img.get('used', False)]
+                if available_images:
+                    # 替换占位符
+                    comment.content = replace_image_placeholders_with_filenames_enhanced(
+                        comment.content, available_images, "[图片]"
+                    )
+
+                    # 标记已使用的图片
+                    for img in available_images[:comment.content.count('[pic:')]:
+                        img['used'] = True
 
     async def process_content_images_with_info(self, zhihu_content: ZhihuContent) -> List[Dict]:
         """

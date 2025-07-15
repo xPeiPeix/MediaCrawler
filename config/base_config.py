@@ -98,6 +98,9 @@ MAX_CONCURRENCY_NUM = 1
 # 是否开启爬图片模式, 默认不开启爬图片
 ENABLE_GET_IMAGES = True
 
+# 是否跳过评论区图片处理，默认处理评论图片
+SKIP_COMMENTS_PIC = False
+
 # 是否开启爬评论模式, 默认开启爬评论
 ENABLE_GET_COMMENTS = True
 

@@ -41,7 +41,7 @@ class ZhihuImageProcessor:
     
     def extract_images_from_html(self, html_content: str, base_url: str = "") -> List[Dict]:
         """
-        从HTML内容中提取图片URL
+        从HTML内容中提取图片URL（包括问题、答案、评论中的图片）
         Args:
             html_content: HTML内容
             base_url: 基础URL，用于处理相对路径
@@ -59,90 +59,20 @@ class ZhihuImageProcessor:
             # 使用BeautifulSoup解析HTML
             soup = BeautifulSoup(html_content, 'html.parser')
 
-            # 首先尝试定位正文区域
-            content_container = self._find_content_container(soup)
-            if not content_container:
-                utils.logger.warning("[ZhihuImageProcessor.extract_images_from_html] Could not find content container, using full page")
-                content_container = soup
+            # 1. 提取问题中的图片
+            question_images = self._extract_question_images(soup, seen_image_ids)
+            images.extend(question_images)
+            utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Found {len(question_images)} question images")
 
-            # 方法1：只从正文区域的figure标签中查找img标签
-            # 基于用户提供的信息，只提取figure标签内的图片
-            figure_tags = content_container.find_all('figure')
-            utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Found {len(figure_tags)} figure tags in content area")
+            # 2. 提取答案中的图片（原有逻辑）
+            answer_images = self._extract_answer_images(soup, seen_image_ids)
+            images.extend(answer_images)
+            utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Found {len(answer_images)} answer images")
 
-            for figure_idx, figure in enumerate(figure_tags):
-                utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Processing figure {figure_idx + 1}")
-                img_tags_in_figure = figure.find_all('img')
-                utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Found {len(img_tags_in_figure)} img tags in figure {figure_idx + 1}")
-
-                for img_idx, img in enumerate(img_tags_in_figure):
-                    # 尝试多种属性获取图片URL
-                    src_candidates = [
-                        img.get('src'),
-                        img.get('data-src'),
-                        img.get('data-original'),
-                        img.get('data-actualsrc')
-                    ]
-                    src = None
-                    for candidate in src_candidates:
-                        if candidate:
-                            src = candidate
-                            break
-
-                    utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Figure {figure_idx + 1}, img {img_idx + 1}: src={src}")
-
-                    if not src:
-                        utils.logger.warning(f"[ZhihuImageProcessor.extract_images_from_html] No valid src found for img {img_idx + 1} in figure {figure_idx + 1}")
-                        continue
-
-                    # 跳过头像和无关图片（额外保险）
-                    if self._is_avatar_or_irrelevant_image(img):
-                        utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Skipping img {img_idx + 1} in figure {figure_idx + 1}: detected as avatar/irrelevant")
-                        continue
-
-                    # 处理相对路径
-                    if src.startswith('//'):
-                        src = 'https:' + src
-                    elif src.startswith('/'):
-                        src = urljoin(base_url, src)
-                    elif not src.startswith(('http://', 'https://')):
-                        src = urljoin(base_url, src)
-
-                    # 过滤掉一些不需要的图片
-                    if self._should_skip_image(src):
-                        # 对于data:协议的URL，只显示前50个字符避免日志过长
-                        display_url = src[:50] + "..." if src.startswith('data:') and len(src) > 50 else src
-                        utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Skipping img {img_idx + 1} in figure {figure_idx + 1}: {display_url} (filtered by skip rules)")
-                        continue
-
-                    # 提取知乎图片ID（用于去重）
-                    image_id = self._extract_zhihu_image_id(src)
-
-                    # 如果已经处理过相同ID的图片，则跳过
-                    if image_id and image_id in seen_image_ids:
-                        utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Skipping duplicate image {img_idx + 1} in figure {figure_idx + 1}: {image_id}")
-                        continue
-
-                    # 如果有有效的图片ID，添加到已处理集合
-                    if image_id:
-                        seen_image_ids.add(image_id)
-
-                    # 获取图片信息
-                    alt_text = img.get('alt', '')
-                    title = img.get('title', '')
-
-                    # 推断文件扩展名
-                    extension = self._get_image_extension(src)
-
-                    images.append({
-                        'url': src,
-                        'alt': alt_text,
-                        'title': title,
-                        'extension': extension,
-                        'filename': f"image_{len(images):03d}.{extension}",
-                        'image_id': image_id  # 保存图片ID用于后续处理
-                    })
-                    utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Successfully added img {img_idx + 1} from figure {figure_idx + 1}: {src}")
+            # 3. 提取评论中的图片
+            comment_images = self._extract_comment_images(soup, seen_image_ids)
+            images.extend(comment_images)
+            utils.logger.info(f"[ZhihuImageProcessor.extract_images_from_html] Found {len(comment_images)} comment images")
 
             # 方法2：从知乎的JavaScript数据中提取图片（针对知乎特殊处理）
             # 注意：暂时禁用JS提取，因为它可能包含页面上所有图片，包括头像
@@ -510,3 +440,304 @@ class ZhihuImageProcessor:
                 pass
 
         return False
+
+    def _extract_question_images(self, soup, seen_image_ids: set) -> List[Dict]:
+        """
+        提取问题内容中的图片
+
+        Args:
+            soup: BeautifulSoup对象
+            seen_image_ids: 已处理的图片ID集合（用于去重）
+
+        Returns:
+            问题图片信息列表
+        """
+        images = []
+
+        try:
+            # 查找问题内容区域，但要排除答案区域
+            question_content_selectors = [
+                '.QuestionHeader .QuestionRichText',  # 更精确的问题区域选择器
+                '.QuestionHeader-detail',
+                '#root .QuestionHeader .QuestionRichText'
+            ]
+
+            question_container = None
+            for selector in question_content_selectors:
+                question_container = soup.select_one(selector)
+                if question_container:
+                    utils.logger.info(f"[ZhihuImageProcessor._extract_question_images] Found question container using selector: {selector}")
+                    break
+
+            if not question_container:
+                utils.logger.info("[ZhihuImageProcessor._extract_question_images] Could not find question container")
+                return []
+
+            # 查找问题内容中的figure标签
+            figure_tags = question_container.find_all('figure')
+            utils.logger.info(f"[ZhihuImageProcessor._extract_question_images] Found {len(figure_tags)} figure tags in question content")
+
+            for figure_idx, figure in enumerate(figure_tags):
+                img_tags = figure.find_all('img')
+
+                for img_idx, img in enumerate(img_tags):
+                    # 尝试多种属性获取图片URL
+                    src_candidates = [
+                        img.get('src'),
+                        img.get('data-src'),
+                        img.get('data-original'),
+                        img.get('data-actualsrc')
+                    ]
+                    src = None
+                    for candidate in src_candidates:
+                        if candidate:
+                            src = candidate
+                            break
+
+                    if not src:
+                        continue
+
+                    # 跳过头像和无关图片
+                    if self._is_avatar_or_irrelevant_image(img):
+                        continue
+
+                    # 处理相对路径
+                    if src.startswith('//'):
+                        src = 'https:' + src
+
+                    # 过滤掉一些不需要的图片
+                    if self._should_skip_image(src):
+                        continue
+
+                    # 提取知乎图片ID（用于去重）
+                    image_id = self._extract_zhihu_image_id(src)
+
+                    # 如果已经处理过相同ID的图片，则跳过
+                    if image_id and image_id in seen_image_ids:
+                        continue
+
+                    # 如果有有效的图片ID，添加到已处理集合
+                    if image_id:
+                        seen_image_ids.add(image_id)
+
+                    # 获取图片信息
+                    alt_text = img.get('alt', '')
+                    title = img.get('title', '')
+
+                    # 推断文件扩展名
+                    extension = self._get_image_extension(src)
+
+                    # 使用question_前缀命名文件
+                    images.append({
+                        'url': src,
+                        'alt': alt_text,
+                        'title': title,
+                        'extension': extension,
+                        'filename': f"question_{len(images):03d}.{extension}",
+                        'image_id': image_id
+                    })
+
+        except Exception as e:
+            utils.logger.error(f"[ZhihuImageProcessor._extract_question_images] Error extracting question images: {e}")
+
+        return images
+
+    def _extract_answer_images(self, soup, seen_image_ids: set) -> List[Dict]:
+        """
+        提取答案内容中的图片（原有逻辑）
+
+        Args:
+            soup: BeautifulSoup对象
+            seen_image_ids: 已处理的图片ID集合（用于去重）
+
+        Returns:
+            答案图片信息列表
+        """
+        images = []
+
+        try:
+            # 首先尝试定位答案正文区域，排除问题区域
+            answer_content_selectors = [
+                '.RichContent-inner .RichText',  # 答案内容区域
+                '.AnswerItem .RichContent .RichText',  # 答案项目中的富文本
+                'span.RichText.ztext.CopyrightRichText-richText',  # 版权富文本区域
+                '.RichText.ztext'  # 通用富文本区域
+            ]
+
+            content_container = None
+            for selector in answer_content_selectors:
+                content_container = soup.select_one(selector)
+                if content_container:
+                    utils.logger.info(f"[ZhihuImageProcessor._extract_answer_images] Found answer container using selector: {selector}")
+                    break
+
+            if not content_container:
+                utils.logger.warning("[ZhihuImageProcessor._extract_answer_images] Could not find answer container, using fallback")
+                content_container = self._find_content_container(soup)
+                if not content_container:
+                    content_container = soup
+
+            # 从答案区域的figure标签中查找img标签
+            figure_tags = content_container.find_all('figure')
+            utils.logger.info(f"[ZhihuImageProcessor._extract_answer_images] Found {len(figure_tags)} figure tags in answer content")
+
+            for figure_idx, figure in enumerate(figure_tags):
+                img_tags = figure.find_all('img')
+
+                for img_idx, img in enumerate(img_tags):
+                    # 尝试多种属性获取图片URL
+                    src_candidates = [
+                        img.get('src'),
+                        img.get('data-src'),
+                        img.get('data-original'),
+                        img.get('data-actualsrc')
+                    ]
+                    src = None
+                    for candidate in src_candidates:
+                        if candidate:
+                            src = candidate
+                            break
+
+                    if not src:
+                        continue
+
+                    # 跳过头像和无关图片
+                    if self._is_avatar_or_irrelevant_image(img):
+                        continue
+
+                    # 处理相对路径
+                    if src.startswith('//'):
+                        src = 'https:' + src
+
+                    # 过滤掉一些不需要的图片
+                    if self._should_skip_image(src):
+                        continue
+
+                    # 提取知乎图片ID（用于去重）
+                    image_id = self._extract_zhihu_image_id(src)
+
+                    # 如果已经处理过相同ID的图片，则跳过
+                    if image_id and image_id in seen_image_ids:
+                        continue
+
+                    # 如果有有效的图片ID，添加到已处理集合
+                    if image_id:
+                        seen_image_ids.add(image_id)
+
+                    # 获取图片信息
+                    alt_text = img.get('alt', '')
+                    title = img.get('title', '')
+
+                    # 推断文件扩展名
+                    extension = self._get_image_extension(src)
+
+                    # 使用answer_前缀命名文件
+                    images.append({
+                        'url': src,
+                        'alt': alt_text,
+                        'title': title,
+                        'extension': extension,
+                        'filename': f"answer_{len(images):03d}.{extension}",
+                        'image_id': image_id
+                    })
+
+        except Exception as e:
+            utils.logger.error(f"[ZhihuImageProcessor._extract_answer_images] Error extracting answer images: {e}")
+
+        return images
+
+    def _extract_comment_images(self, soup, seen_image_ids: set) -> List[Dict]:
+        """
+        提取评论中的图片
+
+        Args:
+            soup: BeautifulSoup对象
+            seen_image_ids: 已处理的图片ID集合（用于去重）
+
+        Returns:
+            评论图片信息列表
+        """
+        images = []
+
+        try:
+            # 查找评论区域，使用更精确的选择器
+            comment_containers = soup.select('div.CommentContent.css-1jpzztt, div.css-1jpzztt')
+            utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] Found {len(comment_containers)} comment containers")
+
+            if not comment_containers:
+                # 尝试备用选择器
+                comment_containers = soup.select('div[class*="CommentContent"]')
+                utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] Found {len(comment_containers)} comment containers using fallback selector")
+
+            if not comment_containers:
+                return []
+
+            for comment_idx, comment in enumerate(comment_containers):
+                # 查找评论中的图片容器，基于info.txt中的信息
+                img_containers = comment.select('div.comment_img.css-1tamgva, div.comment_img, div.css-1tamgva')
+
+                for container_idx, container in enumerate(img_containers):
+                    # 只处理用户上传的图片，忽略表情图片
+                    # 基于info.txt，用户图片使用css-jcttr类，表情图片使用sticker类
+                    img_tags = container.select('img.css-jcttr, img:not(.sticker)')
+
+                    for img_idx, img in enumerate(img_tags):
+                        # 额外检查：跳过明确标记为表情的图片
+                        if 'sticker' in img.get('class', []):
+                            continue
+                        # 尝试多种属性获取图片URL
+                        src_candidates = [
+                            img.get('src'),
+                            img.get('data-src'),
+                            img.get('data-original'),
+                            img.get('data-actualsrc')
+                        ]
+                        src = None
+                        for candidate in src_candidates:
+                            if candidate:
+                                src = candidate
+                                break
+
+                        if not src:
+                            continue
+
+                        # 处理相对路径
+                        if src.startswith('//'):
+                            src = 'https:' + src
+
+                        # 过滤掉一些不需要的图片
+                        if self._should_skip_image(src):
+                            continue
+
+                        # 提取知乎图片ID（用于去重）
+                        image_id = self._extract_zhihu_image_id(src)
+
+                        # 如果已经处理过相同ID的图片，则跳过
+                        if image_id and image_id in seen_image_ids:
+                            continue
+
+                        # 如果有有效的图片ID，添加到已处理集合
+                        if image_id:
+                            seen_image_ids.add(image_id)
+
+                        # 获取图片信息
+                        alt_text = img.get('alt', '')
+                        title = img.get('title', '')
+
+                        # 推断文件扩展名
+                        extension = self._get_image_extension(src)
+
+                        # 使用comment_前缀命名文件
+                        images.append({
+                            'url': src,
+                            'alt': alt_text,
+                            'title': title,
+                            'extension': extension,
+                            'filename': f"comment_{len(images):03d}.{extension}",
+                            'image_id': image_id
+                        })
+
+        except Exception as e:
+            utils.logger.error(f"[ZhihuImageProcessor._extract_comment_images] Error extracting comment images: {e}")
+
+        return images
