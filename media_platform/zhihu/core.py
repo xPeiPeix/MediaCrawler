@@ -1596,29 +1596,36 @@ class ZhihuCrawler(AbstractCrawler):
             html_content = await self.context_page.content()
             soup = BeautifulSoup(html_content, 'html.parser')
 
-            # 查找所有评论容器
-            comment_containers = soup.select('div[data-id]')
-            utils.logger.info(f"[ZhihuCrawler._parse_comments_from_browser] Found {len(comment_containers)} comment containers")
+            # 查找所有评论容器 - 使用更精确的选择器只选择一级评论
+            # 基于实际HTML结构分析：一级评论位于 data-id 容器下，且不嵌套在其他 data-id 容器内
+            all_data_id_containers = soup.select('div[data-id]')
+            utils.logger.info(f"[ZhihuCrawler._parse_comments_from_browser] Found {len(all_data_id_containers)} data-id containers")
+
+            # 精确过滤：只选择真正的一级评论容器
+            comment_containers = []
+            for container in all_data_id_containers:
+                try:
+                    # 检查是否为一级评论：确保这个容器不是嵌套在另一个 data-id 容器内
+                    parent_with_data_id = container.find_parent('div', attrs={'data-id': True})
+                    if not parent_with_data_id:
+                        # 这是一个真正的一级评论容器
+                        comment_containers.append(container)
+                        utils.logger.debug(f"[ZhihuCrawler._parse_comments_from_browser] Found top-level comment {container.get('data-id')}")
+                    else:
+                        reply_count += 1
+                        utils.logger.debug(f"[ZhihuCrawler._parse_comments_from_browser] Skipping nested comment {container.get('data-id')} (nested in {parent_with_data_id.get('data-id')})")
+
+                except Exception as e:
+                    utils.logger.debug(f"[ZhihuCrawler._parse_comments_from_browser] Error checking container structure: {e}")
+                    continue
+
+            utils.logger.info(f"[ZhihuCrawler._parse_comments_from_browser] Filtered to {len(comment_containers)} top-level comment containers")
 
             for container in comment_containers:
                 try:
                     # 获取评论ID
                     comment_id = container.get('data-id')
                     if not comment_id:
-                        continue
-
-                    # 检查是否为二级评论（回复）- 基于用户链接数量和父级CSS类
-                    user_links = container.select('a[href*="/people/"]')
-                    parent_class = container.parent.get('class', []) if container.parent else []
-                    parent_class_str = ' '.join(parent_class) if parent_class else ''
-
-                    # 二级评论特征：用户链接数量<=2 且 父级CSS类为空或不包含特定类
-                    is_reply = (len(user_links) <= 2 and
-                               (not parent_class_str or 'css-18ld3w0' not in parent_class_str))
-
-                    if is_reply:
-                        reply_count += 1
-                        utils.logger.debug(f"[ZhihuCrawler._parse_comments_from_browser] Skipping reply comment {comment_id} (user_links: {len(user_links)}, parent_class: '{parent_class_str}')")
                         continue
 
                     # 获取评论内容
