@@ -1366,53 +1366,93 @@ class ZhihuCrawler(AbstractCrawler):
 
     async def _expand_comments(self):
         """
-        尝试展开评论区域
+        尝试展开评论区域（智能识别，只点击第一个相关的评论按钮）
         """
         try:
-            # 查找评论展开按钮
+            # 查找评论展开按钮（基于info.txt中的实际元素信息优化）
             comment_button_selectors = [
-                'button.ContentItem-action[class*="Button--withLabel"]',  # 基于info.txt中的信息
-                'button.ContentItem-action',
-                '.ContentItem-actions button[class*="Comment"]',
-                '.RichContent-actions button[class*="Comment"]'
+                'button.ContentItem-action[class*="Button--withLabel"]',  # 精确匹配info.txt中的按钮
+                '.ContentItem-actions button.ContentItem-action',  # 在评论操作区域中的按钮
+                '.RichContent-actions button.ContentItem-action',   # 在富文本操作区域中的按钮
+                'button.ContentItem-action',  # 通用的内容项操作按钮
+                '.ContentItem-actions button',  # 备用：评论操作区域中的任何按钮
+                '.RichContent-actions button'   # 备用：富文本操作区域中的任何按钮
             ]
 
-            comment_buttons = []
+            target_button = None
             for selector in comment_button_selectors:
                 buttons = await self.context_page.query_selector_all(selector)
                 if buttons:
-                    # 过滤出包含"条评论"文本的按钮
+                    # 过滤出包含评论相关文本的按钮，只取第一个
                     for button in buttons:
                         try:
                             button_text = await button.inner_text()
-                            if "条评论" in button_text:
-                                comment_buttons.append(button)
-                                utils.logger.info(f"[ZhihuCrawler._expand_comments] Found comment button with text: {button_text}")
+                            # 匹配多种评论按钮文本格式：如"180 条评论"、"条评论"、"评论"等
+                            if any(keyword in button_text for keyword in ["条评论", "评论"]):
+                                target_button = button
+                                utils.logger.info(f"[ZhihuCrawler._expand_comments] Found target comment button with text: {button_text}")
+                                break
                         except Exception as e:
                             utils.logger.debug(f"[ZhihuCrawler._expand_comments] Error getting button text: {e}")
 
-                    if comment_buttons:
-                        utils.logger.info(f"[ZhihuCrawler._expand_comments] Found comment buttons using selector: {selector}")
+                    if target_button:
+                        utils.logger.info(f"[ZhihuCrawler._expand_comments] Found comment button using selector: {selector}")
                         break
 
-            if comment_buttons:
-                utils.logger.info(f"[ZhihuCrawler._expand_comments] Found {len(comment_buttons)} comment buttons to click")
-                for i, button in enumerate(comment_buttons):
-                    try:
-                        await button.click()
-                        utils.logger.info(f"[ZhihuCrawler._expand_comments] Clicked comment button {i+1}")
-                        await asyncio.sleep(1)  # 等待评论加载
-                    except Exception as e:
-                        utils.logger.warning(f"[ZhihuCrawler._expand_comments] Error clicking comment button {i+1}: {e}")
+            if target_button:
+                utils.logger.info("[ZhihuCrawler._expand_comments] Attempting to click the first comment button")
 
-                # 等待评论完全加载
-                await asyncio.sleep(2)
-                utils.logger.info("[ZhihuCrawler._expand_comments] Comments expanded")
+                # 尝试多种点击策略
+                click_success = False
+
+                # 策略1：检查元素可见性并直接点击
+                try:
+                    # 等待元素稳定
+                    await asyncio.sleep(0.5)
+
+                    # 检查元素是否可见
+                    is_visible = await target_button.is_visible()
+                    if is_visible:
+                        await target_button.click(timeout=10000)  # 10秒超时
+                        click_success = True
+                        utils.logger.info("[ZhihuCrawler._expand_comments] Successfully clicked comment button (direct click)")
+                    else:
+                        utils.logger.warning("[ZhihuCrawler._expand_comments] Comment button is not visible")
+                except Exception as e:
+                    utils.logger.warning(f"[ZhihuCrawler._expand_comments] Direct click failed: {e}")
+
+                # 策略2：如果直接点击失败，尝试JavaScript点击
+                if not click_success:
+                    try:
+                        await target_button.evaluate("element => element.click()")
+                        click_success = True
+                        utils.logger.info("[ZhihuCrawler._expand_comments] Successfully clicked comment button (JavaScript click)")
+                    except Exception as e:
+                        utils.logger.warning(f"[ZhihuCrawler._expand_comments] JavaScript click failed: {e}")
+
+                # 策略3：如果还是失败，尝试强制点击
+                if not click_success:
+                    try:
+                        await target_button.click(force=True, timeout=5000)  # 5秒超时，强制点击
+                        click_success = True
+                        utils.logger.info("[ZhihuCrawler._expand_comments] Successfully clicked comment button (force click)")
+                    except Exception as e:
+                        utils.logger.warning(f"[ZhihuCrawler._expand_comments] Force click failed: {e}")
+
+                if click_success:
+                    # 等待评论加载
+                    await asyncio.sleep(2)
+                    utils.logger.info("[ZhihuCrawler._expand_comments] Comment button clicked successfully, waiting for comments to load")
+                else:
+                    utils.logger.warning("[ZhihuCrawler._expand_comments] All click strategies failed, continuing without expanding comments")
+
             else:
                 utils.logger.info("[ZhihuCrawler._expand_comments] No comment buttons found")
 
         except Exception as e:
             utils.logger.warning(f"[ZhihuCrawler._expand_comments] Error expanding comments: {e}")
+            # 确保错误不影响整体流程
+            utils.logger.info("[ZhihuCrawler._expand_comments] Continuing with image processing despite comment expansion failure")
 
     async def _expand_comments_single(self):
         """
