@@ -749,10 +749,7 @@ class ZhihuCrawler(AbstractCrawler):
                                 )
                                 utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Replaced {len(question_images)} question image placeholders")
 
-                            # 存储评论图片信息供后续评论处理使用
-                            if comment_images:
-                                zhihu_content.comment_images_info = comment_images
-                                utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Stored {len(comment_images)} comment images info for later processing")
+                            # 评论图片信息已在处理过程中直接使用，无需额外存储
 
                         all_contents.append(zhihu_content)
 
@@ -835,11 +832,7 @@ class ZhihuCrawler(AbstractCrawler):
                 # 将评论添加到内容对象
                 content_item.comments = browser_comments
 
-                # 处理评论中的图片占位符（如果有评论图片的话）
-                if browser_comments and hasattr(content_item, 'comment_images_info') and content_item.comment_images_info:
-                    utils.logger.info(f"[ZhihuCrawler._get_single_content_comments] Processing comment image placeholders for {content_item.content_id}, found {len(content_item.comment_images_info)} comment images")
-                    self._process_comment_images_with_content_id(browser_comments, content_item.comment_images_info, content_item.content_id)
-                    utils.logger.info(f"[ZhihuCrawler._get_single_content_comments] Completed comment image placeholder processing for {content_item.content_id}")
+                # 评论图片占位符已在评论获取过程中直接处理
 
                 utils.logger.info(f"[ZhihuCrawler._get_single_content_comments] Got {len(browser_comments)} comments using browser method for {content_item.content_id}")
             else:
