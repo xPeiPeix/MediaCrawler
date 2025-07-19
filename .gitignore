@@ -111,9 +111,8 @@ ipython_config.py
 
 # uv
 #   uv.lock contains exact dependency versions and may include platform-specific information
-#   pyproject.toml may contain local environment configurations
+#   pyproject.toml should be committed as it contains project configuration
 uv.lock
-pyproject.toml
 
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
 __pypackages__/

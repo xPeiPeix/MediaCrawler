@@ -8,9 +8,11 @@ requires-python = ">=3.9"
 dependencies = [
     "aiofiles~=23.2.1",
     "aiomysql==0.2.0",
+    "beautifulsoup4==4.13.4",
     "fastapi==0.110.2",
     "httpx==0.24.0",
     "jieba==0.42.1",
+    "lxml>=4.9.0",
     "matplotlib==3.9.0",
     "opencv-python>=4.11.0.86",
     "pandas==2.2.3",
