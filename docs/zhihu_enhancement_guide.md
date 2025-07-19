@@ -5,10 +5,10 @@
 ### 1️⃣ 基本运行（推荐新手）
 ```bash
 # 基本收藏夹爬取
-python main.py --platform zhihu --lt qrcode --type collection
+uv run python main.py --platform zhihu --lt qrcode --type collection
 
 # 快速测试（每个收藏夹只爬前3条）
-python main.py --platform zhihu --lt qrcode --type collection --max_count 3
+uv run python main.py --platform zhihu --lt qrcode --type collection --max_count 3
 ```
 
 ### 2️⃣ 启用增强功能
@@ -27,19 +27,19 @@ MIN_COMMENT_LIKES = 5
 ### 3️⃣ 图片爬取功能
 ```bash
 # 完整模式：爬取问题、答案、评论中的所有图片
-python main.py --platform zhihu --lt qrcode --type collection --max_count 5
+uv run python main.py --platform zhihu --lt qrcode --type collection --max_count 5
 
 # 性能优化模式：跳过评论图片，提升处理速度
-python main.py --platform zhihu --lt qrcode --type collection --max_count 5 --skip-comments-pic
+uv run python main.py --platform zhihu --lt qrcode --type collection --max_count 5 --skip-comments-pic
 ```
 
 ### 4️⃣ 高级用法
 ```bash
 # 增量模式 + 数量限制 + 热门评论 + 图片处理
-python main.py --platform zhihu --lt qrcode --type collection --mode incremental --max_count 5
+uv run python main.py --platform zhihu --lt qrcode --type collection --mode incremental --max_count 5
 
 # 高性能模式：增量 + 跳过评论图片
-python main.py --platform zhihu --lt qrcode --type collection --mode incremental --max_count 5 --skip-comments-pic
+uv run python main.py --platform zhihu --lt qrcode --type collection --mode incremental --max_count 5 --skip-comments-pic
 ```
 
 ## ⚙️ 完整配置说明
@@ -115,7 +115,7 @@ question_view_count: int = 0          # 问题浏览数
 #### 2. 基本收藏夹爬取
 ```bash
 # 标准收藏夹爬取
-python main.py --platform zhihu --lt qrcode --type collection
+uv run python main.py --platform zhihu --lt qrcode --type collection
 ```
 
 ### 进阶使用
@@ -131,7 +131,7 @@ MIN_COMMENT_LIKES = 5         # 只获取点赞数≥5的评论
 #### 2. 数量限制功能
 ```bash
 # 方式1：命令行参数（推荐）
-python main.py --platform zhihu --lt qrcode --type collection --max_count 3
+uv run python main.py --platform zhihu --lt qrcode --type collection --max_count 3
 
 # 方式2：配置文件设置
 # 在 config/base_config.py 中设置：CRAWLER_MAX_COLLECTION_ITEMS_COUNT = 10
@@ -140,10 +140,10 @@ python main.py --platform zhihu --lt qrcode --type collection --max_count 3
 #### 3. 图片爬取功能
 ```bash
 # 完整图片模式（默认）：爬取问题、答案、评论中的所有图片
-python main.py --platform zhihu --lt qrcode --type collection --max_count 5
+uv run python main.py --platform zhihu --lt qrcode --type collection --max_count 5
 
 # 性能优化模式：跳过评论图片处理，提升速度
-python main.py --platform zhihu --lt qrcode --type collection --max_count 5 --skip-comments-pic
+uv run python main.py --platform zhihu --lt qrcode --type collection --max_count 5 --skip-comments-pic
 ```
 
 **图片功能特点：**
@@ -155,13 +155,13 @@ python main.py --platform zhihu --lt qrcode --type collection --max_count 5 --sk
 #### 4. 组合使用
 ```bash
 # 增量模式 + 数量限制
-python main.py --platform zhihu --lt qrcode --type collection --mode incremental --max_count 5
+uv run python main.py --platform zhihu --lt qrcode --type collection --mode incremental --max_count 5
 
 # 完整功能组合（包含图片）
-python main.py --platform zhihu --lt qrcode --type collection --max_count 10 --mode incremental
+uv run python main.py --platform zhihu --lt qrcode --type collection --max_count 10 --mode incremental
 
 # 高性能组合（跳过评论图片）
-python main.py --platform zhihu --lt qrcode --type collection --max_count 10 --mode incremental --skip-comments-pic
+uv run python main.py --platform zhihu --lt qrcode --type collection --max_count 10 --mode incremental --skip-comments-pic
 ```
 
 ### 常用场景
@@ -169,19 +169,19 @@ python main.py --platform zhihu --lt qrcode --type collection --max_count 10 --m
 #### 🔍 快速测试
 ```bash
 # 每个收藏夹只爬前3条，快速验证功能
-python main.py --platform zhihu --lt qrcode --type collection --max_count 3
+uv run python main.py --platform zhihu --lt qrcode --type collection --max_count 3
 ```
 
 #### 📊 日常更新
 ```bash
 # 增量模式，只获取新内容，每个收藏夹前5条
-python main.py --platform zhihu --lt qrcode --type collection --mode incremental --max_count 5
+uv run python main.py --platform zhihu --lt qrcode --type collection --mode incremental --max_count 5
 ```
 
 #### 📚 完整收集
 ```bash
 # 不限制数量，获取所有内容
-python main.py --platform zhihu --lt qrcode --type collection --max_count 0
+uv run python main.py --platform zhihu --lt qrcode --type collection --max_count 0
 ```
 
 ## 📈 效果对比
@@ -208,16 +208,16 @@ python main.py --platform zhihu --lt qrcode --type collection --max_count 0
 ### 首次使用建议
 ```bash
 # 1. 先用小数量测试功能
-python main.py --platform zhihu --lt qrcode --type collection --max_count 3
+uv run python main.py --platform zhihu --lt qrcode --type collection --max_count 3
 
 # 2. 确认功能正常后，适当增加数量
-python main.py --platform zhihu --lt qrcode --type collection --max_count 10
+uv run python main.py --platform zhihu --lt qrcode --type collection --max_count 10
 ```
 
 ### 日常使用建议
 ```bash
 # 定期更新：增量模式 + 适量限制
-python main.py --platform zhihu --lt qrcode --type collection --mode incremental --max_count 5
+uv run python main.py --platform zhihu --lt qrcode --type collection --mode incremental --max_count 5
 ```
 
 ### 配置推荐
@@ -365,9 +365,41 @@ A: JSON文件存储在 `data/zhihu/json/` 目录，图片存储在 `data/zhihu/i
 - 详细日志，便于调试
 - 灵活配置，适应多种场景
 
-## 📝 最新更新 (2025-07-16)
+## 📝 最新更新
 
-### 🎉 热门评论数量限制修复
+### 🎉 2025-07-19 - 依赖包修复与环境优化
+- ✅ **依赖包完整性修复**：添加缺失的 `beautifulsoup4==4.13.4` 和 `lxml>=4.9.0`
+- 🔧 **httpx 兼容性修复**：修复所有平台客户端的 AsyncClient 参数问题
+- 🚀 **新设备部署优化**：完善部署命令，确保一键运行成功
+- 📦 **包管理规范化**：使用 uv 包管理器确保环境一致性
+
+#### 🚀 新设备完整部署命令
+```bash
+# 1. 克隆项目
+git clone https://github.com/xPeiPeix/MediaCrawler.git
+cd MediaCrawler
+
+# 2. 创建环境并安装依赖
+uv sync
+
+# 3. 安装浏览器驱动
+uv run playwright install
+
+# 4. 运行知乎收藏夹爬虫
+uv run python main.py --platform zhihu --lt qrcode --type collection --mode incremental
+```
+
+#### 🔧 技术修复详情
+- **修复文件**：5个平台客户端的 httpx.AsyncClient 调用
+  - `media_platform/zhihu/client.py`
+  - `media_platform/xhs/client.py`
+  - `media_platform/tieba/client.py`
+  - `media_platform/weibo/client.py`
+  - `media_platform/bilibili/client.py`
+- **修复内容**：将 `proxy=self.proxies` 改为 `proxies=self.proxies`
+- **兼容版本**：httpx 0.24.0
+
+### 🎉 2025-07-16 - 热门评论数量限制修复
 - ✅ **完全解决配置不生效问题**：`HOT_COMMENTS_COUNT = 10` 现在在两种模式下都严格生效
 - 🔧 **浏览器解析模式修复**：收藏夹爬取正确应用热门评论筛选
 - 📊 **API模式验证**：确认skip-comments-pic模式热门评论功能正常
