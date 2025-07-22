@@ -1829,40 +1829,51 @@ class ZhihuCrawler(AbstractCrawler):
             comment_images: 图片列表（按文件名排序）
             content_id: 内容ID，用于构建完整路径
         """
+        utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] === IMAGE REPLACEMENT START ===")
         utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Processing {len(comments)} comments with {len(comment_images)} images")
+        if comment_images:
+            utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Available images: {[img['filename'] for img in comment_images]}")
 
         image_index = 0
         total_replaced = 0
 
-        for comment in comments:
+        for comment_idx, comment in enumerate(comments):
             # 统计当前评论中的图片占位符数量
             placeholder_count = comment.content.count("[图片]")
 
+            utils.logger.debug(f"[ZhihuCrawler._process_comment_images_enhanced] Comment {comment_idx+1}/{len(comments)} (ID: {comment.comment_id}): {placeholder_count} placeholders")
+
             if placeholder_count > 0:
-                utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Comment {comment.comment_id} has {placeholder_count} placeholders: {comment.content[:100]}")
+                utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] ✓ Comment {comment.comment_id} has {placeholder_count} placeholders")
+                utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Content preview: {comment.content[:100]}...")
 
                 if image_index < len(comment_images):
                     # 获取当前评论需要的图片
                     needed_images = comment_images[image_index:image_index + placeholder_count]
+                    utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Using images {image_index} to {image_index + placeholder_count - 1}: {[img['filename'] for img in needed_images]}")
 
                     # 逐个替换占位符
                     updated_content = comment.content
-                    for img_info in needed_images:
+                    for img_idx, img_info in enumerate(needed_images):
                         filename = img_info['filename']
                         # 新格式：[content_id/filename]
                         replacement = f"[{content_id}/{filename}]"
                         updated_content = updated_content.replace("[图片]", replacement, 1)
-                        utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Replaced [图片] with {replacement} in comment {comment.comment_id}")
+                        utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] ✓ Replaced [图片] #{img_idx+1} with {replacement} in comment {comment.comment_id}")
 
                     comment.content = updated_content
                     image_index += placeholder_count
                     total_replaced += placeholder_count
-
-                    utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Updated comment {comment.comment_id}: {comment.content[:100]}")
                 else:
-                    utils.logger.warning(f"[ZhihuCrawler._process_comment_images_enhanced] Not enough images for comment {comment.comment_id}, need {placeholder_count} but only {len(comment_images) - image_index} remaining")
+                    utils.logger.warning(f"[ZhihuCrawler._process_comment_images_enhanced] ✗ Not enough images! Comment {comment.comment_id} needs {placeholder_count} images but only {len(comment_images) - image_index} remaining")
+            else:
+                utils.logger.debug(f"[ZhihuCrawler._process_comment_images_enhanced] - Comment {comment.comment_id}: no placeholders")
 
-        utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Total replaced {total_replaced} placeholders")
+        utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] === IMAGE REPLACEMENT COMPLETE ===")
+        utils.logger.info(f"[ZhihuCrawler._process_comment_images_enhanced] Total replaced {total_replaced} placeholders using {image_index} images")
+        if image_index < len(comment_images):
+            unused_images = len(comment_images) - image_index
+            utils.logger.warning(f"[ZhihuCrawler._process_comment_images_enhanced] {unused_images} images were not used: {[img['filename'] for img in comment_images[image_index:]]}")
 
     async def process_content_images_with_info(self, zhihu_content: ZhihuContent) -> List[Dict]:
         """

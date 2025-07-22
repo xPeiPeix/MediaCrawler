@@ -648,7 +648,7 @@ class ZhihuImageProcessor:
 
     def _extract_comment_images(self, soup, seen_image_ids: set) -> List[Dict]:
         """
-        提取评论中的图片
+        提取评论中的图片（只处理一级评论，与 _parse_comments_from_browser 逻辑完全一致）
 
         Args:
             soup: BeautifulSoup对象
@@ -658,28 +658,72 @@ class ZhihuImageProcessor:
             评论图片信息列表
         """
         images = []
+        reply_count = 0  # 统计过滤的二级评论数量
 
         try:
-            # 查找评论区域，使用更精确的选择器
-            comment_containers = soup.select('div.CommentContent.css-1jpzztt, div.css-1jpzztt')
-            utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] Found {len(comment_containers)} comment containers")
+            # 使用与 _parse_comments_from_browser 完全相同的过滤逻辑
+            # 查找所有评论容器 - 使用更精确的选择器只选择一级评论
+            # 基于实际HTML结构分析：一级评论位于 data-id 容器下，且不嵌套在其他 data-id 容器内
+            all_data_id_containers = soup.select('div[data-id]')
+            utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] Found {len(all_data_id_containers)} data-id containers")
 
-            if not comment_containers:
-                # 尝试备用选择器
-                comment_containers = soup.select('div[class*="CommentContent"]')
-                utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] Found {len(comment_containers)} comment containers using fallback selector")
+            # 精确过滤：只选择真正的一级评论容器
+            comment_containers = []
+            filtered_reply_ids = []  # 记录被过滤的二级评论ID
+
+            for container in all_data_id_containers:
+                try:
+                    container_id = container.get('data-id', 'unknown')
+                    # 检查是否为一级评论：确保这个容器不是嵌套在另一个 data-id 容器内
+                    parent_with_data_id = container.find_parent('div', attrs={'data-id': True})
+                    if not parent_with_data_id:
+                        # 这是一个真正的一级评论容器
+                        comment_containers.append(container)
+                        utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] ✓ Top-level comment {container_id}")
+                    else:
+                        reply_count += 1
+                        parent_id = parent_with_data_id.get('data-id', 'unknown')
+                        filtered_reply_ids.append(container_id)
+                        utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] ✗ Filtered nested comment {container_id} (parent: {parent_id})")
+
+                except Exception as e:
+                    utils.logger.warning(f"[ZhihuImageProcessor._extract_comment_images] Error checking container {container.get('data-id', 'unknown')}: {e}")
+                    continue
+
+            utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] === FILTERING SUMMARY ===")
+            utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] Total containers: {len(all_data_id_containers)}")
+            utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] Top-level comments: {len(comment_containers)}")
+            utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] Filtered replies: {reply_count}")
+            if filtered_reply_ids:
+                utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] Filtered reply IDs: {', '.join(filtered_reply_ids[:10])}{'...' if len(filtered_reply_ids) > 10 else ''}")
 
             if not comment_containers:
                 return []
 
-            for comment_idx, comment in enumerate(comment_containers):
-                # 查找评论中的图片容器，基于info.txt中的信息
-                img_containers = comment.select('div.comment_img.css-1tamgva, div.comment_img, div.css-1tamgva')
+            utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] === IMAGE EXTRACTION ===")
+
+            for comment_idx, comment_container in enumerate(comment_containers):
+                container_id = comment_container.get('data-id', f'unknown_{comment_idx}')
+                # 在一级评论容器中查找图片容器，基于info.txt中的信息
+                img_containers = comment_container.select('div.comment_img.css-1tamgva, div.comment_img, div.css-1tamgva')
+
+                utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] Processing comment {container_id}: found {len(img_containers)} image containers")
+
+                comment_images_count = 0  # 统计当前评论的图片数量
 
                 for container_idx, container in enumerate(img_containers):
+                    # 检查图片容器是否在嵌套的二级评论中
+                    # 如果图片容器的父级中有其他data-id容器（除了当前一级评论），则跳过
+                    nested_data_id = container.find_parent('div', attrs={'data-id': True})
+                    if nested_data_id and nested_data_id != comment_container:
+                        utils.logger.debug(f"[ZhihuImageProcessor._extract_comment_images] Skipping image container in nested comment {nested_data_id.get('data-id')}")
+                        continue
+
                     # 只处理用户上传的图片，忽略表情图片
                     # 基于info.txt，用户图片使用css-jcttr类，表情图片使用sticker类
                     img_tags = container.select('img.css-jcttr, img:not(.sticker)')
+
+                    utils.logger.debug(f"[ZhihuImageProcessor._extract_comment_images] Comment {container_id} container {container_idx}: found {len(img_tags)} image tags")
 
                     for img_idx, img in enumerate(img_tags):
                         # 额外检查：跳过明确标记为表情的图片
@@ -728,16 +772,29 @@ class ZhihuImageProcessor:
                         extension = self._get_image_extension(src)
 
                         # 使用comment_前缀命名文件
+                        filename = f"comment_{len(images):03d}.{extension}"
                         images.append({
                             'url': src,
                             'alt': alt_text,
                             'title': title,
                             'extension': extension,
-                            'filename': f"comment_{len(images):03d}.{extension}",
+                            'filename': filename,
                             'image_id': image_id
                         })
 
+                        comment_images_count += 1
+                        utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] ✓ Added image {filename} from comment {container_id} (URL: {src[:50]}...)")
+
+                # 记录当前评论的图片统计
+                if comment_images_count > 0:
+                    utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] Comment {container_id} total images: {comment_images_count}")
+
         except Exception as e:
             utils.logger.error(f"[ZhihuImageProcessor._extract_comment_images] Error extracting comment images: {e}")
+
+        utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] === EXTRACTION COMPLETE ===")
+        utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] Total images extracted: {len(images)}")
+        if images:
+            utils.logger.info(f"[ZhihuImageProcessor._extract_comment_images] Image filenames: {[img['filename'] for img in images]}")
 
         return images
