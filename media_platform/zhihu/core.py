@@ -749,7 +749,10 @@ class ZhihuCrawler(AbstractCrawler):
                                 )
                                 utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Replaced {len(question_images)} question image placeholders")
 
-                            # 评论图片信息已在处理过程中直接使用，无需额外存储
+                            # 存储评论图片信息供后续评论处理使用
+                            if comment_images:
+                                zhihu_content.comment_images_info = comment_images
+                                utils.logger.info(f"[ZhihuCrawler.get_collection_contents] Stored {len(comment_images)} comment images info for later processing")
 
                         all_contents.append(zhihu_content)
 
@@ -832,7 +835,44 @@ class ZhihuCrawler(AbstractCrawler):
                 # 将评论添加到内容对象
                 content_item.comments = browser_comments
 
-                # 评论图片占位符已在评论获取过程中直接处理
+                # 检测并处理评论图片占位符
+                has_comment_images = False
+                if browser_comments:
+                    for comment in browser_comments:
+                        if "[图片]" in comment.content:
+                            has_comment_images = True
+                            content_item.has_comment_images = True
+                            utils.logger.info(f"[ZhihuCrawler._get_single_content_comments] Detected comment images for {content_item.content_id}")
+                            break
+
+                if browser_comments and has_comment_images:
+                    # 优先使用已存储的评论图片信息
+                    comment_images = []
+                    if hasattr(content_item, 'comment_images_info') and content_item.comment_images_info:
+                        comment_images = content_item.comment_images_info
+                        utils.logger.info(f"[ZhihuCrawler._get_single_content_comments] Using stored comment images info: {len(comment_images)} images for {content_item.content_id}")
+                    else:
+                        # 如果没有存储的图片信息，则扫描图片目录
+                        image_dir = f"data/zhihu/images/collection_contents/{content_item.content_id}"
+
+                        import os
+                        if os.path.exists(image_dir):
+                            comment_files = []
+                            for filename in os.listdir(image_dir):
+                                if filename.startswith('comment_') and filename.endswith(('.jpg', '.png', '.jpeg', '.webp')):
+                                    comment_files.append(filename)
+
+                            # 按文件名排序，确保comment_000.jpg在comment_001.jpg前面
+                            comment_files.sort()
+                            for filename in comment_files:
+                                comment_images.append({'filename': filename})
+
+                            utils.logger.info(f"[ZhihuCrawler._get_single_content_comments] Scanned image directory: {len(comment_images)} images for {content_item.content_id}")
+
+                    if comment_images:
+                        # 使用增强版的占位符替换，按顺序替换
+                        self._process_comment_images_enhanced(browser_comments, comment_images, content_item.content_id)
+                        utils.logger.info(f"[ZhihuCrawler._get_single_content_comments] Processed {len(comment_images)} comment image placeholders for {content_item.content_id}")
 
                 utils.logger.info(f"[ZhihuCrawler._get_single_content_comments] Got {len(browser_comments)} comments using browser method for {content_item.content_id}")
             else:

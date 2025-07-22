@@ -53,6 +53,7 @@ class ZhihuContent(BaseModel):
 
     # 评论数据（收藏夹爬取时使用）
     comments: List['ZhihuComment'] = Field(default_factory=list, description="评论列表")
+    comment_images_info: List[dict] = Field(default_factory=list, description="评论图片信息列表")
 
 
 class ZhihuComment(BaseModel):
